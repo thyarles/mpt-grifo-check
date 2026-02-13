@@ -1,9 +1,3 @@
-//FUNC REPLACE ALL
-String.prototype.replaceAll = function(search, replacement) {
-  var target = this;
-  return target.split(search).join(replacement);
-};
-
 var saldo_jornada_mes_at = 0;
 var saldo_current = 0;
 var idx_hoje = 0;
