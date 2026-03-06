@@ -12,12 +12,6 @@ const GRIFO_CONFIG = {
     RECALC_DELAY: 100
   },
 
-  // Default time limits
-  DEFAULT_HOURS: {
-    MIN: '08:30',
-    MAX: '20:30'
-  },
-
   // Regex patterns
   PATTERNS: {
     TIME_FORMAT: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/
@@ -40,16 +34,13 @@ const GRIFO_CONFIG = {
     CONTAINER_JORNADA: 'conteinerJornada',
     MEU_PONTO: 'meuPonto',
     MINHA_JORNADA: 'minhaJornada',
-    MEU_SALDO: 'meuSaldo',
-    MEU_INTERVALO: 'meuIntervalo'
+    MEU_SALDO: 'meuSaldo'
   },
 
   // IDs
   IDS: {
     CONTAINER_TOTAL: 'conteinerSaldoTotal',
-    BTN_RELOAD: 'btnReload',
-    HOR_MIN: 'horMin',
-    HOR_MAX: 'horMax'
+    BTN_RELOAD: 'btnReload'
   },
 
   // Colors
