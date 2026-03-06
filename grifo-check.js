@@ -456,13 +456,12 @@ class GrifoCheck {
       saldoJornadaAcumHj += isCompleteForToday ? cargaJornada : 0;
 
       const html = `
-        <input size="5" 
+        <input type="hidden" 
                style="background-color:${colorChange}" 
                class="${GRIFO_CONFIG.CLASSES.MINHA_JORNADA} dia${contadorDia}" 
                id="minhaJornada${contadorDia}" 
                value="${jDia || ''}" 
                val-orig="${jDiaOrig || ''}">
-        <br class="${GRIFO_CONFIG.CLASSES.MINHA_JORNADA}">
       `;
 
       $(`#conteinerjornada${contadorDia}`).append(html);
@@ -511,13 +510,13 @@ class GrifoCheck {
         const colorB2 = b2 !== b2Orig ? GRIFO_CONFIG.COLORS.HIGHLIGHT : GRIFO_CONFIG.COLORS.WHITE;
 
         html += `<input size="5" 
-                        style="background-color:${colorB1}" 
+                        style="background-color:${colorB1};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;margin-right:4px" 
                         class="${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}" 
                         id="meuPonto${contadorDia}-${contadorBatida}-1" 
                         value="${b1 || ''}" 
                         val-orig="${b1Orig || ''}">`;
         html += `<input size="5" 
-                        style="background-color:${colorB2}" 
+                        style="background-color:${colorB2};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;margin-right:4px" 
                         class="${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}" 
                         id="meuPonto${contadorDia}-${contadorBatida}-2" 
                         value="${b2 || ''}" 
@@ -566,14 +565,14 @@ class GrifoCheck {
           }
         }
 
-        html += `<input size="5" 
+        html += `<!--<input size="5" 
                         class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
                         disabled 
-                        style="${cssErro ? 'background-color:' + cssErro : ''}" 
+                        style="${cssErro ? 'background-color:' + cssErro + ';' : ''}border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;font-weight:600" 
                         id="meuPonto${contadorDia}-${contadorBatida}-saldo" 
-                        value="${saldoBatida}">
+                        value="${saldoBatida}">-->
                  ${strAlert}
-                 <br class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}">`;
+                 <spam class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}">`;
 
         contadorBatida++;
       });
@@ -592,7 +591,7 @@ class GrifoCheck {
 
       html += `<input size="4" 
                       class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-                      style="margin-left:98px;font-weight:bold;${cssSaldo}" 
+                      style="font-weight:bold;${cssSaldo};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center" 
                       disabled 
                       id="meuPonto${contadorDia}-${contadorBatida}-saldo_horario_dia" 
                       value="${GrifoUtils.formatMsec(saldoHorarioDia)}">${cappedWarning}`;
@@ -740,14 +739,14 @@ class GrifoCheck {
               Você esteve presente por 
               <strong style="font-size:15px;color:#FFD93D;">${GrifoUtils.formatMsec(saldoHorarioMes)}</strong>
               ${this.state.saldoJornadaAcumHj !== 0 ? `
-                <br>de um total de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>
+                <br>de um total de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>.
               ` : ''}
             </div>
             ${this.state.saldoJornadaAcumHj !== 0 ? `
               <div style="margin-top:12px;
                           padding-top:12px;
                           border-top:1px solid rgba(255,255,255,0.15);">
-                <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">Saldo Corrente</div>
+                <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">SALDO CORRENTE</div>
                 <div style="font-size:20px;font-weight:700;color:${saldoCurrentCalc < 0 ? '#FF6B6B' : '#51CF66'};">
                   ${saldoCurrentCalc < 0 ? '' : '+'}${GrifoUtils.formatMsec(saldoCurrentCalc)}
                 </div>
@@ -802,7 +801,7 @@ class GrifoCheck {
                         backdrop-filter:blur(10px);
                         border:2px solid rgba(255,255,255,0.15);">
               <div style="font-size:11px;opacity:0.8;margin-bottom:6px;">
-                Saldo Final do Período
+                SALDO FINAL DO PERÍODO
               </div>
               <div style="font-size:22px;font-weight:700;color:${colorFinal};">
                 ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}

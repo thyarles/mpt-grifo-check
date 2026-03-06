@@ -45,12 +45,12 @@ const GRIFO_CONFIG = {
 
   // Colors
   COLORS: {
-    HIGHLIGHT: '#FF0',
+    HIGHLIGHT: '#FFF9C4',
     WHITE: '#FFF',
-    ERROR: '#F00',
-    SUCCESS: '#22A80C',
-    DISABLED: '#CCC',
-    LIGHT_ERROR: '#F9C8C8',
+    ERROR: '#F44336',
+    SUCCESS: '#4CAF50',
+    DISABLED: '#E0E0E0',
+    LIGHT_ERROR: '#FFEBEE',
     PRIMARY: '#990000',
     SECONDARY: '#23439D',
     BACKGROUND: '#EEE'
