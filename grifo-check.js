@@ -1,6 +1,36 @@
 'use strict';
 
 /**
+ * ============================================
+ * DEBUG MODE
+ * ============================================
+ * Set DEBUG to true to enable detailed console logging
+ * Set DEBUG to false to disable all debug output
+ * 
+ * Debug logs will show:
+ * - Teletrabalho auto-fill operations
+ * - Previous balance retrieval (Chrome compatibility fixes)
+ * - Calculation summaries and results
+ * - Step-by-step execution flow
+ */
+const DEBUG = true;
+
+/**
+ * Debug logging helper
+ * @param {string} message - Message to log
+ * @param {any} data - Optional data to log
+ */
+function debugLog(message, data = null) {
+  if (DEBUG) {
+    if (data !== null) {
+      console.log(`[Grifo Debug] ${message}`, data);
+    } else {
+      console.log(`[Grifo Debug] ${message}`);
+    }
+  }
+}
+
+/**
  * Grifo Check - Main Application Class
  * Chrome extension for calculating work hours and balances
  * Refactored for Chrome with modern JavaScript (ES6+)
@@ -20,7 +50,7 @@ class GrifoCheck {
       idCookiePeriodo: '',
       idCookieConfig: ''
     };
-    
+
     this.observer = null;
     this.init();
   }
@@ -44,7 +74,7 @@ class GrifoCheck {
 
       const headerText = GrifoUtils.safeText(headerElement);
       const nameParts = headerText.split(',');
-      
+
       if (nameParts.length > 1) {
         this.state.strNome = nameParts[1].toUpperCase().trim();
         this.state.cctNome = nameParts[1].trim().replaceAll(' ', '');
@@ -52,7 +82,7 @@ class GrifoCheck {
 
       const dateInput = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.DATE_INPUT);
       const dateValue = dateInput ? dateInput.val() : '';
-      
+
       this.state.idCookiePeriodo = `${this.state.cctNome}-grifo_saldo-${dateValue}`;
       this.state.idCookieConfig = `${this.state.cctNome}-grifo_saldo`;
 
@@ -68,18 +98,18 @@ class GrifoCheck {
    */
   setupObserver() {
     this.observer = new MutationObserver((mutations) => {
-      const hasRelevantChanges = mutations.some(mutation => 
+      const hasRelevantChanges = mutations.some(mutation =>
         mutation.target.matches?.(GRIFO_CONFIG.SELECTORS.RESULT_SECTION) ||
         mutation.target.querySelector?.(GRIFO_CONFIG.SELECTORS.RESULT_SECTION)
       );
-      
+
       if (hasRelevantChanges) {
         this.checkAndStart();
       }
     });
 
-    const config = { 
-      childList: true, 
+    const config = {
+      childList: true,
       subtree: true,
       attributes: false
     };
@@ -93,11 +123,11 @@ class GrifoCheck {
   checkAndStart() {
     const resultSection = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.RESULT_SECTION);
     const containerExists = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).length > 0;
-    
+
     if (!resultSection || containerExists) return;
 
     const editPessoa = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.EDIT_PESSOA);
-    const shouldProceed = !editPessoa || 
+    const shouldProceed = !editPessoa ||
       (editPessoa.val().trim() === this.state.strNome.trim());
 
     if (shouldProceed) {
@@ -110,7 +140,7 @@ class GrifoCheck {
    */
   startMonitoring() {
     this.checkAndStart();
-    
+
     // Fallback polling for edge cases
     setInterval(() => this.checkAndStart(), GRIFO_CONFIG.TIME.CHECK_INTERVAL);
   }
@@ -123,26 +153,26 @@ class GrifoCheck {
     const arrJornadasOrig = [];
     const arrHorariosOrig = [];
     let contador = 1;
-    
+
     const today = new Date();
     const strHoje = GrifoUtils.formatDate(today, 'dd/MM/yy');
 
     // Remove old containers
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}, .${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}`).remove();
-    
+
     const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
     if (!tableRows) return { arrJornadasOrig, arrHorariosOrig };
 
     tableRows.each((index, row) => {
       const $row = $(row);
-      
+
       // Process schedules (jornadas)
       arrJornadasOrig.push(this.getJornadaDiaOrig($row));
       $row.find('td:eq(1)').append(
         `<br class="${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}">` +
         `<span class="${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}" id="conteinerjornada${contador}"></span>`
       );
-      
+
       // Process time entries (horarios)
       arrHorariosOrig.push(this.getHorariosDiaOrig($row));
       $row.find('td:eq(2)').append(
@@ -169,24 +199,24 @@ class GrifoCheck {
    */
   getJornadaDiaOrig(rowElement) {
     let jornadaDia = '00:00';
-    
+
     try {
       const cellContent = rowElement.find('td:eq(1)');
       if (!GrifoUtils.safeText(cellContent)) return jornadaDia;
 
       const content = cellContent.clone();
       content.find('img').remove();
-      
+
       const htmlContent = content.html().replaceAll('<br>', '#');
       const scheduleParts = htmlContent.trim().split('#');
       let totalTime = 0;
 
       scheduleParts.forEach(part => {
         const times = part.split(' - ').map(t => t.trim().replaceAll('&nbsp;', ''));
-        
-        if (times.length >= 2 && 
-            GrifoUtils.isValidTime(times[0]) && 
-            GrifoUtils.isValidTime(times[1])) {
+
+        if (times.length >= 2 &&
+          GrifoUtils.isValidTime(times[0]) &&
+          GrifoUtils.isValidTime(times[1])) {
           totalTime += GrifoUtils.diffDate(times[0], times[1]);
         }
       });
@@ -194,6 +224,7 @@ class GrifoCheck {
       jornadaDia = GrifoUtils.formatMsec(totalTime);
     } catch (error) {
       console.error('Error getting jornada:', error);
+      debugLog('ERROR in getJornadaDiaOrig', error);
     }
 
     return jornadaDia;
@@ -206,14 +237,14 @@ class GrifoCheck {
    */
   getHorariosDiaOrig(rowElement) {
     const arrDiaHorarios = [];
-    
+
     try {
       const cellContent = rowElement.find('td:eq(2)');
       if (!GrifoUtils.safeText(cellContent)) return arrDiaHorarios;
 
       const content = cellContent.clone();
       content.find('img').remove();
-      
+
       const htmlContent = content.html().replaceAll('<br>', '#');
       const timeParts = htmlContent.trim().split('#');
 
@@ -234,7 +265,7 @@ class GrifoCheck {
   saveCookieInputValues() {
     const jornadaInputs = $(`.${GRIFO_CONFIG.CLASSES.MINHA_JORNADA}`);
     const pontoInputs = $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}`);
-    
+
     if (!jornadaInputs.length || !pontoInputs.length) return;
 
     const arrJornadasInput = [];
@@ -248,7 +279,7 @@ class GrifoCheck {
       // Process time entries for this day
       $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}.dia${dia + 1}`).each((index, elem) => {
         const inputVal = $(elem).val();
-        
+
         if (index % 2 === 0) {
           backupVal = inputVal;
         } else {
@@ -337,14 +368,14 @@ class GrifoCheck {
    */
   getJornadasHorariosCookie() {
     const arrCookie = GrifoUtils.cookies.get(this.state.idCookiePeriodo);
-    
+
     if (arrCookie.length > 0) {
       return {
         arr_jornadas_ck: arrCookie[0],
         arr_horarios_ck: arrCookie[1]
       };
     }
-    
+
     return {};
   }
 
@@ -363,14 +394,14 @@ class GrifoCheck {
    */
   getConfigCookie() {
     const arrCookie = GrifoUtils.cookies.get(this.state.idCookieConfig);
-    
+
     if (arrCookie.length > 0) {
       return {
         hor_min: arrCookie[0],
         hor_max: arrCookie[1]
       };
     }
-    
+
     return {};
   }
 
@@ -402,9 +433,9 @@ class GrifoCheck {
     arrJornadas.forEach((jornada, dia) => {
       const jDia = GrifoUtils.isValidTime(jornada) ? jornada : '00:00';
       const jDiaOrig = GrifoUtils.isValidTime(arrJornadasOrig[dia]) ? arrJornadasOrig[dia] : '00:00';
-      
-      const colorChange = jDia !== jDiaOrig ? 
-        GRIFO_CONFIG.COLORS.HIGHLIGHT : 
+
+      const colorChange = jDia !== jDiaOrig ?
+        GRIFO_CONFIG.COLORS.HIGHLIGHT :
         GRIFO_CONFIG.COLORS.WHITE;
 
       // Check if all time entries for today are filled
@@ -415,8 +446,8 @@ class GrifoCheck {
         arrHorarios[dia].forEach(batida => {
           const b1 = batida[0];
           const b2 = batida[1];
-          isCompleteForToday = isCompleteForToday && 
-            GrifoUtils.isValidTime(b1) && 
+          isCompleteForToday = isCompleteForToday &&
+            GrifoUtils.isValidTime(b1) &&
             GrifoUtils.isValidTime(b2);
         });
       }
@@ -475,11 +506,11 @@ class GrifoCheck {
 
         // Apply time limits
         if (index === 0) {
-          b1 = GrifoUtils.diffDate('00:00', b1) < GrifoUtils.diffDate('00:00', this.state.horMin) ? 
+          b1 = GrifoUtils.diffDate('00:00', b1) < GrifoUtils.diffDate('00:00', this.state.horMin) ?
             this.state.horMin : b1;
         }
         if (index === diaHorarios.length - 1) {
-          b2 = GrifoUtils.diffDate('00:00', b2) > GrifoUtils.diffDate('00:00', this.state.horMax) ? 
+          b2 = GrifoUtils.diffDate('00:00', b2) > GrifoUtils.diffDate('00:00', this.state.horMax) ?
             this.state.horMax : b2;
         }
 
@@ -514,8 +545,8 @@ class GrifoCheck {
           let isCompleteForToday = true;
           if (contadorHoje) {
             diaHorarios.forEach(bat => {
-              isCompleteForToday = isCompleteForToday && 
-                GrifoUtils.isValidTime(bat[0]) && 
+              isCompleteForToday = isCompleteForToday &&
+                GrifoUtils.isValidTime(bat[0]) &&
                 GrifoUtils.isValidTime(bat[1]);
             });
           }
@@ -525,13 +556,13 @@ class GrifoCheck {
           const saldoRest = jornadaDia - (saldoHorarioDia || 0);
           const horaDebito = GrifoUtils.formatMsec(Math.abs(saldoRest));
 
-          cssErro = contadorHoje > 0 ? 
-            GRIFO_CONFIG.COLORS.DISABLED : 
+          cssErro = contadorHoje > 0 ?
+            GRIFO_CONFIG.COLORS.DISABLED :
             (saldoRest > 0 ? GRIFO_CONFIG.COLORS.ERROR : GRIFO_CONFIG.COLORS.LIGHT_ERROR);
 
           if (GrifoUtils.isValidTime(b1) || GrifoUtils.isValidTime(b2)) {
             const saidaSugerida = GrifoUtils.formatDate(
-              GrifoUtils.sumDateMsec(b1, saldoRest), 
+              GrifoUtils.sumDateMsec(b1, saldoRest),
               'HH:mm'
             );
             const sinal = saldoRest <= 0 ? '+' : '-';
@@ -555,7 +586,7 @@ class GrifoCheck {
         contadorBatida++;
       });
 
-      const cssSaldo = (jornadaDia > saldoHorarioDia && contadorHoje <= 0) ? 
+      const cssSaldo = (jornadaDia > saldoHorarioDia && contadorHoje <= 0) ?
         `color:${GRIFO_CONFIG.COLORS.ERROR}` : '';
 
       html += `<input size="4" 
@@ -581,17 +612,52 @@ class GrifoCheck {
    * @param {number} cntHoje - Today counter
    */
   executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje) {
-    const previousBalanceText = GrifoUtils.safeText(
-      GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE)
-    );
+    debugLog('\n=== executaCalculo START ===');
+    debugLog(`  saldoJornadaMesAt: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
+    debugLog(`  saldoHorarioMes: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
+    debugLog(`  saldoJornadaAcumHj: ${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}`);
+    
+    // Try multiple methods to get previous balance
+    let previousBalanceText = '';
+    let $balanceElement = null;
+    
+    // Method 1: Original selector
+    $balanceElement = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE);
+    previousBalanceText = GrifoUtils.safeText($balanceElement);
+    debugLog(`  Method 1 (original selector): "${previousBalanceText}"`);
+    
+    // Method 2: Without tbody (Chrome compatibility)
+    if (!previousBalanceText) {
+      $balanceElement = $('#divSecaoSaldoMesAnterior > fieldset > table > tr:eq(0) > td:eq(1)');
+      previousBalanceText = GrifoUtils.safeText($balanceElement);
+      debugLog(`  Method 2 (no tbody): "${previousBalanceText}"`);
+    }
+    
+    // Method 3: Find by text content
+    if (!previousBalanceText) {
+      $('#divSecaoSaldoMesAnterior table tr').each((index, row) => {
+        const $row = $(row);
+        const firstCell = $row.find('td:eq(0)').text().trim();
+        if (firstCell.includes('Banco de horas anterior')) {
+          previousBalanceText = $row.find('td:eq(1)').text().trim();
+          debugLog(`  Method 3 (find by text): "${previousBalanceText}"`);
+          return false; // break
+        }
+      });
+    }
+    
+    debugLog(`  Final previousBalanceText: "${previousBalanceText}"`);
     const saldoBHoras = GrifoUtils.diffHoraMsec(previousBalanceText);
+    debugLog(`  saldoBHoras (in msec): ${saldoBHoras} (${GrifoUtils.formatMsec(saldoBHoras)})`);
+    
     const saldoCurrentCalc = saldoHorarioMes - this.state.saldoJornadaAcumHj;
+    debugLog(`  saldoCurrentCalc: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
 
     // Remove existing container and store position
     let top = '10px';
     let left = 'calc(50% - 150px)';
     const existingContainer = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`);
-    
+
     if (existingContainer.length) {
       const position = existingContainer.position();
       top = `${position.top}px`;
@@ -605,7 +671,7 @@ class GrifoCheck {
                              size="4" 
                              value="${this.state.horMin || ''}" 
                              val-ant="${this.state.horMin || ''}">`;
-    
+
     const inputMax = `<input id="${GRIFO_CONFIG.IDS.HOR_MAX}" 
                              style="font-size:12px;text-align:center" 
                              class="${GRIFO_CONFIG.CLASSES.MEU_INTERVALO}" 
@@ -614,34 +680,33 @@ class GrifoCheck {
                              val-ant="${this.state.horMax || ''}">`;
 
     const faltaSobra = saldoJornadaMesAt > saldoHorarioMes ? 'Falta' : 'Sobra';
-    const colorDiff = saldoJornadaMesAt - saldoHorarioMes > 0 ? 
-      GRIFO_CONFIG.COLORS.ERROR : 
+    const colorDiff = saldoJornadaMesAt - saldoHorarioMes > 0 ?
+      GRIFO_CONFIG.COLORS.ERROR :
       GRIFO_CONFIG.COLORS.SUCCESS;
 
-    const colorCurrent = saldoCurrentCalc < 0 ? 
-      GRIFO_CONFIG.COLORS.ERROR : 
+    const colorCurrent = saldoCurrentCalc < 0 ?
+      GRIFO_CONFIG.COLORS.ERROR :
       GRIFO_CONFIG.COLORS.SUCCESS;
 
-    const colorFinal = saldoHorarioMes - saldoJornadaMesAt + saldoBHoras < 0 ? 
-      GRIFO_CONFIG.COLORS.ERROR : 
+    const colorFinal = saldoHorarioMes - saldoJornadaMesAt + saldoBHoras < 0 ?
+      GRIFO_CONFIG.COLORS.ERROR :
       GRIFO_CONFIG.COLORS.SUCCESS;
 
-    const colorBanco = saldoBHoras < 0 ? 
-      GRIFO_CONFIG.COLORS.ERROR : 
+    const colorBanco = saldoBHoras < 0 ?
+      GRIFO_CONFIG.COLORS.ERROR :
       GRIFO_CONFIG.COLORS.SUCCESS;
 
     const containerHTML = `
       <div id="${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}" 
-           style="position:fixed;z-index:99999;left:${left};cursor:move;top:${top};
-                  width:300px;padding:20px;border:1px solid #999;
-                  background-color:${GRIFO_CONFIG.COLORS.HIGHLIGHT};opacity:0.9;
-                  line-height:30px;font-weight:bold;font-size:15px;border-radius:5px">
-          <span style="font-size:20px;color:${GRIFO_CONFIG.COLORS.PRIMARY};padding-top:10px">
+        style="position:fixed;z-index:99999;left:${left};cursor:move;top:${top};
+                  width:300px;padding:20px;background-color:${GRIFO_CONFIG.COLORS.HIGHLIGHT};
+                  opacity:0.9;line-height:30px;font-weight:bold;font-size:15px;border-radius:5px">
+        <span style="font-size:20px;color:${GRIFO_CONFIG.COLORS.PRIMARY};padding:20px">
           <img style="height:30px;float:left" src="${GRIFO_CONFIG.LOGO_SVG}">
           Grifo Check
         </span>
-        <br><br>
-        Jornada: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}
+        <br>
+        <spam style="padding:20px">Jornada: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}</spam>
         <br>
         <div>Limite: ${inputMin}&nbsp;-&nbsp;${inputMax}</div>
         <br>
@@ -660,7 +725,7 @@ class GrifoCheck {
         <br>
         ${faltaSobra}: <span style="color:${colorDiff}">
           ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt)}
-        </span> (${this.state.totalDias - this.state.idxHoje} dia(s))
+        </span> [${this.state.totalDias - this.state.idxHoje} dia(s)]
         ${saldoBHoras ? `
           <br>
           <span style="color:${GRIFO_CONFIG.COLORS.SECONDARY}">
@@ -695,6 +760,18 @@ class GrifoCheck {
     }
 
     $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).draggable();
+
+    // Debug summary
+    debugLog('\\n--- CALCULATION SUMMARY ---');
+    debugLog(`  Jornada Total: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
+    debugLog(`  Horas Trabalhadas: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
+    debugLog(`  Jornada Acumulada até Hoje: ${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}`);
+    debugLog(`  Saldo Corrente: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
+    debugLog(`  ${faltaSobra}: ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt)}`);
+    debugLog(`  Banco de Horas Anterior: ${previousBalanceText} (${GrifoUtils.formatMsec(saldoBHoras)})`);
+    debugLog(`  Saldo Final: ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}`);
+    debugLog(`  Erros: ${cntErro}`);
+    debugLog('=== executaCalculo END ===\\n');
 
     this.setupEventHandlers();
   }
@@ -748,18 +825,18 @@ class GrifoCheck {
   redefineIntervalo() {
     const horMinInput = $(`#${GRIFO_CONFIG.IDS.HOR_MIN}`);
     const horMaxInput = $(`#${GRIFO_CONFIG.IDS.HOR_MAX}`);
-    
+
     if (!horMinInput.length || !horMaxInput.length) return;
 
     const newMin = horMinInput.val();
     const newMax = horMaxInput.val();
-    
+
     this.state.horMin = newMin === this.state.horMin ? this.state.horMin : newMin;
     this.state.horMax = newMax === this.state.horMax ? this.state.horMax : newMax;
 
     // Ensure max is greater than min
-    if (GrifoUtils.diffDate('00:00', this.state.horMax) <= 
-        GrifoUtils.diffDate('00:00', this.state.horMin)) {
+    if (GrifoUtils.diffDate('00:00', this.state.horMax) <=
+      GrifoUtils.diffDate('00:00', this.state.horMin)) {
       this.state.horMax = GrifoUtils.formatMsec(
         GrifoUtils.diffDate('00:00', this.state.horMin) + GRIFO_CONFIG.TIME.ONE_HOUR
       );
@@ -768,7 +845,7 @@ class GrifoCheck {
     // Clear inputs that match old limits
     const oldMin = horMinInput.attr('val-ant');
     const oldMax = horMaxInput.attr('val-ant');
-    
+
     $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}[value="${oldMin}"]`).val('');
     $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}[value="${oldMax}"]`).val('');
 
@@ -781,21 +858,127 @@ class GrifoCheck {
   }
 
   /**
+   * Auto-fill time entries for days with "Teletrabalho" observation
+   * Checks each day's observation and if "Teletrabalho" is found,
+   * fills the empty time boxes with the schedule times
+   */
+  autoFillTeletrabalho() {
+    debugLog('\\n=== Starting autoFillTeletrabalho ===');
+    
+    const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
+    if (!tableRows) {
+      debugLog('ERROR: No table rows found!');
+      return;
+    }
+
+    debugLog(`Found ${tableRows.length} table rows`);
+    let contador = 1;
+    let filledCount = 0;
+
+    tableRows.each((index, row) => {
+      const $row = $(row);
+      
+      // Find observation image by title attribute
+      const $observationImg = $row.find('img[title*="Detalhar"]');
+      debugLog(`  Observation img found: ${$observationImg.length > 0}`);
+      
+      if ($observationImg.length > 0) {
+        // Get the onmouseover attribute to check for "Teletrabalho"
+        const onmouseover = $observationImg.attr('onmouseover') || '';
+        const hasTeletrabalho = onmouseover.toLowerCase().includes('teletrabalho');
+        
+        if (hasTeletrabalho) {
+          debugLog(`\\n  Row ${contador}: ✓ TELETRABALHO FOUND`);
+          
+          // Extract schedule times from column 2 (td:eq(1))
+          const scheduleCell = $row.find('td:eq(1)');
+          const scheduleText = scheduleCell.text().trim();
+          debugLog(`    Schedule: "${scheduleText}"`);
+          
+          // Parse the schedule (e.g., "12:00 - 19:00")
+          const scheduleMatch = scheduleText.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+          
+          if (scheduleMatch) {
+            const startTime = scheduleMatch[1];
+            const endTime = scheduleMatch[2];
+            debugLog(`    Times: ${startTime} - ${endTime}`);
+            
+            // Get the first two input boxes for this day
+            const input1ID = `meuPonto${contador}-1-1`;
+            const input2ID = `meuPonto${contador}-1-2`;
+            
+            const input1 = $(`#${input1ID}`);
+            const input2 = $(`#${input2ID}`);
+            
+            // Only fill if the boxes are empty
+            let filled = false;
+            if (input1.length > 0 && !input1.val()) {
+              debugLog(`    → Filling ${input1ID} with ${startTime}`);
+              input1.val(startTime);
+              input1.attr('val-orig', '');
+              input1.css('background-color', GRIFO_CONFIG.COLORS.HIGHLIGHT);
+              filled = true;
+            }
+            
+            if (input2.length > 0 && !input2.val()) {
+              debugLog(`    → Filling ${input2ID} with ${endTime}`);
+              input2.val(endTime);
+              input2.attr('val-orig', '');
+              input2.css('background-color', GRIFO_CONFIG.COLORS.HIGHLIGHT);
+              filled = true;
+            }
+            
+            if (filled) filledCount++;
+          } else {
+            debugLog('    ✗ Could not parse schedule times');
+          }
+        }
+      }
+      
+      contador++;
+    });
+    
+    debugLog(`\n=== Finished autoFillTeletrabalho - Filled ${filledCount} days ===\n`);
+    
+    // Trigger recalculation if any fields were filled
+    if (filledCount > 0) {
+      debugLog('Triggering recalculation...');
+      setTimeout(() => {
+        $(`#${GRIFO_CONFIG.IDS.BTN_RELOAD}`).click();
+      }, 100);
+    }
+  }
+
+  /**
    * Main start function - coordina all operations
    */
   start() {
+    debugLog('\n\n========== GRIFO CHECK START ==========');
+    
     this.saveCookieInputValues();
+    
+    debugLog('Getting array data from cookies...');
     const arrDados = this.getArrResultCk();
+    
+    debugLog('Setting input jornadas...');
     const arrResultJ = this.setInputJornadas(
       arrDados.arrJornadas,
       arrDados.arrJornadasOrig,
       arrDados.arrHorarios
     );
+    debugLog(`  Result - saldoJornadaMesAt: ${GrifoUtils.formatMsec(arrResultJ.saldoJornadaMesAt)}`);
+    
+    debugLog('Setting input horarios...');
     const arrResultH = this.setInputHorarios(
       arrDados.arrJornadas,
       arrDados.arrHorarios,
       arrDados.arrHorariosOrig
     );
+    debugLog(`  Result - saldoHorarioMes: ${GrifoUtils.formatMsec(arrResultH.saldoHorarioMes)}`);
+    debugLog(`  Result - cnt_erro: ${arrResultH.cnt_erro}, cnt_hoje: ${arrResultH.cnt_hoje}`);
+
+    // Auto-fill time entries for days with Teletrabalho observation
+    this.autoFillTeletrabalho();
 
     this.executaCalculo(
       arrResultJ.saldoJornadaMesAt,
@@ -804,6 +987,8 @@ class GrifoCheck {
       arrResultH.cnt_erro,
       arrResultH.cnt_hoje
     );
+    
+    debugLog('========== GRIFO CHECK END ==========\n\n');
   }
 }
 

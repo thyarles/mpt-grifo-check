@@ -3,16 +3,25 @@
   "name": "MPT Grifo Check",
   "version": "0.1.0",
   "description": "Calcula o saldo do Grifo.",
-
   "icons": {
-    "16": "icons/grifo_16.png",
-    "48": "icons/grifo_48.png",
-    "128": "icons/grifo_128.png"
+    "16": "images/MPT-Grifo-16.png",
+    "32": "images/MPT-Grifo-32.png",
+    "48": "images/MPT-Grifo-48.png",
+    "128": "images/MPT-Grifo-128.png"
   },
-
+  "action": {
+    "default_icon": {
+      "16": "images/MPT-Grifo-16.png",
+      "32": "images/MPT-Grifo-32.png",
+      "48": "images/MPT-Grifo-48.png",
+      "128": "images/MPT-Grifo-128.png"
+    }
+  },
   "content_scripts": [
     {
-      "matches": ["*://grifo.mpt.mp.br/*"],
+      "matches": [
+        "*://grifo.mpt.mp.br/*"
+      ],
       "js": [
         "jquery-3.2.1.min.js",
         "js-cookie.min.js",

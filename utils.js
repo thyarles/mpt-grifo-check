@@ -24,18 +24,35 @@ const GrifoUtils = {
 
   /**
    * Convert time string with optional negative sign to milliseconds
-   * @param {string} timeStr - Time string (e.g., "-08:30" or "08:30")
+   * @param {string} timeStr - Time string (e.g., "-08:30", "08:30", or "39:57")
    * @returns {number} Time in milliseconds (negative if time was negative)
    */
   diffHoraMsec(timeStr) {
     try {
+      if (!timeStr || timeStr.trim() === '') return 0;
+      
       const factor = timeStr.indexOf('-') !== -1 ? -1 : 1;
-      const cleanTime = factor < 0 ? timeStr.substring(1) : timeStr;
-      const baseDate = '2015-08-05';
-      const date1 = new Date(`${baseDate} 00:00:00`);
-      const date2 = new Date(`${baseDate} ${cleanTime}:00`);
-      const diff = date2.getTime() - date1.getTime();
-      return diff * factor;
+      const cleanTime = factor < 0 ? timeStr.substring(1).trim() : timeStr.trim();
+      
+      // Parse HH:mm manually to support hours > 23
+      const timeParts = cleanTime.split(':');
+      if (timeParts.length !== 2) return 0;
+      
+      const hours = parseInt(timeParts[0], 10);
+      const minutes = parseInt(timeParts[1], 10);
+      
+      if (isNaN(hours) || isNaN(minutes)) return 0;
+      
+      // Convert to milliseconds
+      const totalMs = (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+      const result = totalMs * factor;
+      
+      // Debug logging (if DEBUG is defined globally)
+      if (typeof DEBUG !== 'undefined' && DEBUG) {
+        console.log(`[Grifo Debug] diffHoraMsec: "${timeStr}" → ${hours}h ${minutes}m → ${result}ms (${this.formatMsec(result)})`);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error converting time to milliseconds:', error);
       return 0;
@@ -166,6 +183,9 @@ const GrifoUtils = {
   safeSelect(selector) {
     try {
       const element = $(selector);
+      if (element.length <= 0) {
+        console.warn(`Wrong select element: ${selector}`);
+      }
       return element.length > 0 ? element : null;
     } catch (error) {
       console.error(`Error selecting element: ${selector}`, error);
