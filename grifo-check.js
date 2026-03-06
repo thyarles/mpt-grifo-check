@@ -13,7 +13,7 @@
  * - Calculation summaries and results
  * - Step-by-step execution flow
  */
-const DEBUG = true;
+const DEBUG = false;
 
 /**
  * Debug logging helper
@@ -668,74 +668,179 @@ class GrifoCheck {
 
     const faltaSobra = saldoJornadaMesAt > saldoHorarioMes ? 'Falta' : 'Sobra';
     const colorDiff = saldoJornadaMesAt - saldoHorarioMes > 0 ?
-      GRIFO_CONFIG.COLORS.ERROR :
-      GRIFO_CONFIG.COLORS.SUCCESS;
+      '#FF6B6B' :  // Bright red for negative
+      '#51CF66';   // Bright green for positive
 
     const colorCurrent = saldoCurrentCalc < 0 ?
-      GRIFO_CONFIG.COLORS.ERROR :
-      GRIFO_CONFIG.COLORS.SUCCESS;
+      '#FF6B6B' :  // Bright red for negative
+      '#51CF66';   // Bright green for positive
 
     const colorFinal = saldoHorarioMes - saldoJornadaMesAt + saldoBHoras < 0 ?
-      GRIFO_CONFIG.COLORS.ERROR :
-      GRIFO_CONFIG.COLORS.SUCCESS;
+      '#FF6B6B' :  // Bright red for negative
+      '#51CF66';   // Bright green for positive
 
     const colorBanco = saldoBHoras < 0 ?
-      GRIFO_CONFIG.COLORS.ERROR :
-      GRIFO_CONFIG.COLORS.SUCCESS;
+      '#FF6B6B' :  // Bright red for negative
+      '#51CF66';   // Bright green for positive
 
     const containerHTML = `
       <div id="${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}" 
-        style="position:fixed;z-index:99999;left:${left};cursor:move;top:${top};
-                  width:300px;padding:20px;background-color:${GRIFO_CONFIG.COLORS.HIGHLIGHT};
-                  opacity:0.9;line-height:30px;font-weight:bold;font-size:15px;border-radius:5px">
-        <span style="font-size:20px;color:${GRIFO_CONFIG.COLORS.PRIMARY};padding:20px">
-          <img style="height:30px;float:left" src="${GRIFO_CONFIG.LOGO_SVG}">
-          Grifo Check
-        </span>
-        <br>
-        <spam style="padding:20px">Jornada: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}</spam>
-        <br>
-        <div style="border-top:2px solid #0012FF;border-bottom:2px solid #0012FF;font-weight:normal">
-          Até o momento você esteve presente por 
-          <span style="font-weight:bold">${GrifoUtils.formatMsec(saldoHorarioMes)}h</span>
-          ${this.state.saldoJornadaAcumHj !== 0 ? `
-            de um total de <span style="font-weight:bold">${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}h</span>.
-            <br>
-            <span style="font-weight:bold;color:${GRIFO_CONFIG.COLORS.SECONDARY}">Seu saldo corrente é </span>
-            <span style="font-weight:bold;text-decoration:underline;color:${colorCurrent}">
-              ${saldoCurrentCalc < 0 ? '' : '+'}${GrifoUtils.formatMsec(saldoCurrentCalc)}h
-            </span>
-          ` : ''}
+        style="position:fixed;
+               z-index:99999;
+               left:${left};
+               top:${top};
+               cursor:move;
+               width:340px;
+               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+               border-radius:16px;
+               box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.1);
+               padding:0;
+               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+               color:#fff;
+               overflow:hidden;">
+        
+        <!-- Header -->
+        <div style="background:rgba(0,0,0,0.15);
+                    padding:20px;
+                    border-bottom:1px solid rgba(255,255,255,0.1);
+                    display:flex;
+                    align-items:center;
+                    justify-content:space-between;
+                    gap:20px;">
+          <img style="height:36px;filter:brightness(0) invert(1);" src="${GRIFO_CONFIG.LOGO_SVG}">
+          <div style="text-align:right;flex:1;">
+            <div style="font-size:20px;font-weight:700;letter-spacing:-0.5px;">Grifo Check</div>
+            <div style="font-size:11px;opacity:0.8;font-weight:400;margin-top:2px;">Controle de Jornada</div>
+          </div>
         </div>
-        <br>
-        ${faltaSobra}: <span style="color:${colorDiff}">
-          ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt)}
-        </span> [${this.state.totalDias - this.state.idxHoje} dia(s)]
-        ${saldoBHoras ? `
-          <br>
-          <span style="color:${GRIFO_CONFIG.COLORS.SECONDARY}">
-            Banco horas: <span style="color:${colorBanco}">
-              ${previousBalanceText}
-            </span>
-          </span>
-          <br>
-          <span style="color:${GRIFO_CONFIG.COLORS.SECONDARY}">
-            Saldo final: <span style="color:${colorFinal}">
-              ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}
-            </span>
-          </span>
-        ` : ''}
-        ${cntErro > 0 ? `
-          <br>
-          <span style="color:${GRIFO_CONFIG.COLORS.ERROR}">
-            Corrigir: ${cntErro}
-          </span>
-        ` : ''}
-        <br><br>
-        <a style="padding:3px;background-color:#0012FF;color:#FFF;cursor:pointer" 
-           id="${GRIFO_CONFIG.IDS.BTN_RELOAD}">
-          Recalcular
-        </a>
+        
+        <!-- Main Content -->
+        <div style="padding:20px;">
+          
+          <!-- Jornada Info -->
+          <div style="background:rgba(255,255,255,0.1);
+                      border-radius:10px;
+                      padding:12px 16px;
+                      margin-bottom:16px;
+                      backdrop-filter:blur(10px);">
+            <div style="font-size:11px;opacity:0.8;font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Jornada Total
+            </div>
+            <div style="font-size:24px;font-weight:700;">${GrifoUtils.formatMsec(saldoJornadaMesAt)}</div>
+          </div>
+          
+          <!-- Current Status -->
+          <div style="background:rgba(255,255,255,0.1);
+                      border-radius:10px;
+                      padding:14px 16px;
+                      margin-bottom:16px;
+                      backdrop-filter:blur(10px);
+                      line-height:1.6;">
+            <div style="font-size:13px;font-weight:400;opacity:0.95;">
+              Você esteve presente por 
+              <strong style="font-size:15px;color:#FFD93D;">${GrifoUtils.formatMsec(saldoHorarioMes)}</strong>
+              ${this.state.saldoJornadaAcumHj !== 0 ? `
+                <br>de um total de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>
+              ` : ''}
+            </div>
+            ${this.state.saldoJornadaAcumHj !== 0 ? `
+              <div style="margin-top:12px;
+                          padding-top:12px;
+                          border-top:1px solid rgba(255,255,255,0.15);">
+                <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">Saldo Corrente</div>
+                <div style="font-size:20px;font-weight:700;color:${saldoCurrentCalc < 0 ? '#FF6B6B' : '#51CF66'};">
+                  ${saldoCurrentCalc < 0 ? '' : '+'}${GrifoUtils.formatMsec(saldoCurrentCalc)}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+          
+          <!-- Balance Summary -->
+          <div style="display:grid;
+                      grid-template-columns:1fr 1fr;
+                      gap:10px;
+                      margin-bottom:16px;">
+            
+            <div style="background:rgba(255,255,255,0.1);
+                        border-radius:10px;
+                        padding:12px;
+                        backdrop-filter:blur(10px);
+                        text-align:center;">
+              <div style="font-size:10px;opacity:0.8;margin-bottom:4px;text-transform:uppercase;">
+                ${faltaSobra}
+              </div>
+              <div style="font-size:16px;font-weight:700;color:${colorDiff};">
+                ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt)}
+              </div>
+              <div style="font-size:9px;opacity:0.7;margin-top:2px;">
+                ${this.state.totalDias - this.state.idxHoje} dia(s)
+              </div>
+            </div>
+            
+            ${saldoBHoras ? `
+              <div style="background:rgba(255,255,255,0.1);
+                          border-radius:10px;
+                          padding:12px;
+                          backdrop-filter:blur(10px);
+                          text-align:center;">
+                <div style="font-size:10px;opacity:0.8;margin-bottom:4px;text-transform:uppercase;">
+                  Banco
+                </div>
+                <div style="font-size:16px;font-weight:700;color:${colorBanco};">
+                  ${previousBalanceText}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+          
+          ${saldoBHoras ? `
+            <!-- Final Balance -->
+            <div style="background:rgba(0,0,0,0.2);
+                        border-radius:10px;
+                        padding:14px 16px;
+                        margin-bottom:16px;
+                        backdrop-filter:blur(10px);
+                        border:2px solid rgba(255,255,255,0.15);">
+              <div style="font-size:11px;opacity:0.8;margin-bottom:6px;">
+                Saldo Final do Período
+              </div>
+              <div style="font-size:22px;font-weight:700;color:${colorFinal};">
+                ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}
+              </div>
+            </div>
+          ` : ''}
+          
+          ${cntErro > 0 ? `
+            <div style="background:rgba(255,107,107,0.2);
+                        border:1px solid rgba(255,107,107,0.4);
+                        border-radius:8px;
+                        padding:10px 12px;
+                        margin-bottom:16px;
+                        font-size:12px;">
+              <strong>${cntErro}</strong> dia(s) para corrigir
+            </div>
+          ` : ''}
+          
+          <!-- Recalcular Button -->
+          <button id="${GRIFO_CONFIG.IDS.BTN_RELOAD}"
+                  style="width:100%;
+                         padding:14px;
+                         background:rgba(255,255,255,0.95);
+                         color:#667eea;
+                         border:none;
+                         border-radius:10px;
+                         font-size:14px;
+                         font-weight:700;
+                         cursor:pointer;
+                         transition:all 0.2s;
+                         box-shadow:0 4px 12px rgba(0,0,0,0.15);
+                         text-transform:uppercase;
+                         letter-spacing:0.5px;"
+                  onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(0,0,0,0.2)'"
+                  onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'">
+            🔄 Recalcular
+          </button>
+        </div>
       </div>
     `;
 
