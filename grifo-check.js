@@ -45,11 +45,24 @@ class GrifoCheck {
       totalDias: 0,
       strNome: '',
       cctNome: '',
-      idCookiePeriodo: ''
+      idCookiePeriodo: '',
+      enabled: true,
+      arrJornadasOrigSaved: null,
+      arrHorariosOrigSaved: null
     };
 
     this.observer = null;
-    this.init();
+    this.ENABLED_COOKIE_NAME = 'grifo-check-enabled';
+    this.loadEnabledState();
+    
+    // Always add the toggle, even when disabled
+    this.addToggleToHistorico();
+    
+    if (this.state.enabled) {
+      this.init();
+    } else {
+      debugLog('Grifo Check is disabled. Not initializing.');
+    }
   }
 
   /**
@@ -59,6 +72,215 @@ class GrifoCheck {
     this.extractUserInfo();
     this.setupObserver();
     this.startMonitoring();
+  }
+
+  /**
+   * Add toggle switch to div.historico (stays visible when disabled)
+   */
+  addToggleToHistorico() {
+    // Check if toggle already exists
+    if ($('#grifo-toggle-historico').length > 0) {
+      debugLog('Toggle already exists in historico');
+      return;
+    }
+
+    // Wait for the historico div to be available
+    const checkHistorico = setInterval(() => {
+      const $historico = $('.historico');
+      if ($historico.length > 0) {
+        clearInterval(checkHistorico);
+        
+        const toggleHTML = `
+          <div id="grifo-toggle-historico" 
+               style="display:inline-flex;
+                      align-items:center;
+                      gap:8px;
+                      float:right;
+                      vertical-align:middle;">
+            <span style="font-size:11px;
+                        font-weight:600;
+                        color:#666;">Grifo Check:</span>
+            <label style="position:relative;
+                          display:inline-block;
+                          width:44px;
+                          height:24px;
+                          cursor:pointer;
+                          vertical-align:middle;">
+              <input type="checkbox" 
+                     id="grifo-toggle" 
+                     ${this.state.enabled ? 'checked' : ''}
+                     style="opacity:0;
+                            width:0;
+                            height:0;">
+              <span class="grifo-toggle-slider"
+                    style="position:absolute;
+                           cursor:pointer;
+                           top:0;
+                           left:0;
+                           right:0;
+                           bottom:0;
+                           background-color:#ccc;
+                           transition:0.3s;
+                           border-radius:24px;
+                           box-shadow:0 2px 4px rgba(0,0,0,0.2);">
+                <span class="grifo-toggle-button"
+                      style="position:absolute;
+                             content:'';
+                             height:18px;
+                             width:18px;
+                             left:3px;
+                             bottom:3px;
+                             background-color:white;
+                             transition:0.3s;
+                             border-radius:50%;
+                             box-shadow:0 2px 4px rgba(0,0,0,0.3);"></span>
+              </span>
+            </label>
+            <span id="grifo-toggle-status" 
+                  style="font-size:11px;
+                        font-weight:600;
+                        color:${this.state.enabled ? '#51CF66' : '#999'};">
+            </span>
+          </div>
+        `;
+        
+        $historico.append(toggleHTML);
+        
+        // Add CSS for toggle animation
+        const toggleStyles = `
+          <style id="grifo-toggle-styles">
+            #grifo-toggle:checked + .grifo-toggle-slider {
+              background-color: #51CF66 !important;
+            }
+            #grifo-toggle:checked + .grifo-toggle-slider > .grifo-toggle-button {
+              transform: translateX(20px);
+            }
+            #grifo-toggle-historico:hover {
+              opacity: 0.9;
+            }
+          </style>
+        `;
+        if ($('#grifo-toggle-styles').length === 0) {
+          $('head').append(toggleStyles);
+        }
+        
+        // Setup toggle event handler
+        this.setupToggleHandler();
+        
+        debugLog('Toggle added to historico');
+      }
+    }, 100);
+    
+    // Stop checking after 10 seconds
+    setTimeout(() => clearInterval(checkHistorico), 10000);
+  }
+
+  /**
+   * Setup toggle switch event handler
+   */
+  setupToggleHandler() {
+    $('#grifo-toggle').off('change').on('change', (e) => {
+      const isChecked = $(e.target).is(':checked');
+      
+      if (!isChecked && this.state.enabled) {
+        // User is disabling the extension (no confirmation)
+        this.disable();
+        $('#grifo-toggle-status').css('color', '#999');
+        this.clickConsultarButton();
+      } else if (isChecked && !this.state.enabled) {
+        // User is enabling the extension (no confirmation)
+        $('#grifo-toggle-status').css('color', '#51CF66');
+        this.enable();
+        this.clickConsultarButton();
+      }
+    });
+  }
+
+  /**
+   * Click the Consultar button to refresh the page
+   */
+  clickConsultarButton() {
+    // Find the Consultar button by its attributes
+    const $consultarBtn = $('button[name="botao_operacao"][value="consultar"]');
+    if ($consultarBtn.length > 0) {
+      debugLog('Clicking Consultar button...');
+      setTimeout(() => {
+        $consultarBtn.click();
+      }, 200);
+    } else {
+      debugLog('Consultar button not found');
+    }
+  }
+
+  /**
+   * Load enabled state from cookies
+   */
+  loadEnabledState() {
+    const savedState = Cookies.get(this.ENABLED_COOKIE_NAME);
+    if (savedState !== undefined) {
+      this.state.enabled = savedState === 'true';
+      debugLog(`Loaded enabled state: ${this.state.enabled}`);
+    } else {
+      this.state.enabled = true;
+      debugLog('No saved state found, defaulting to enabled');
+    }
+  }
+
+  /**
+   * Save enabled state to cookies
+   */
+  saveEnabledState() {
+    Cookies.set(this.ENABLED_COOKIE_NAME, String(this.state.enabled), {
+      expires: GRIFO_CONFIG.TIME.COOKIE_EXPIRY_DAYS
+    });
+    debugLog(`Saved enabled state: ${this.state.enabled}`);
+  }
+
+  /**
+   * Enable the extension
+   */
+  enable() {
+    debugLog('Enabling Grifo Check...');
+    this.state.enabled = true;
+    this.saveEnabledState();
+    this.init();
+  }
+
+  /**
+   * Disable the extension
+   */
+  disable() {
+    debugLog('Disabling Grifo Check...');
+    this.state.enabled = false;
+    this.saveEnabledState();
+    
+    // Stop observer
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+      debugLog('Observer disconnected');
+    }
+    
+    // Remove all UI elements
+    $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).remove();
+    $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}`).remove();
+    $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}`).remove();
+    $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}`).remove();
+    $(`.${GRIFO_CONFIG.CLASSES.MINHA_JORNADA}`).remove();
+    $(`.${GRIFO_CONFIG.CLASSES.MEU_SALDO}`).remove();
+    
+    debugLog('All UI elements removed');
+  }
+
+  /**
+   * Toggle extension on/off
+   */
+  toggle() {
+    if (this.state.enabled) {
+      this.disable();
+    } else {
+      this.enable();
+    }
   }
 
   /**
@@ -181,6 +403,15 @@ class GrifoCheck {
    * @returns {Object} Arrays of original schedules and times
    */
   getDadosMesOrig() {
+    // If we've already saved the original values, reuse them (don't remove containers or re-read table)
+    if (this.state.arrJornadasOrigSaved !== null && this.state.arrHorariosOrigSaved !== null) {
+      debugLog('Using saved original values');
+      return {
+        arrJornadasOrig: this.state.arrJornadasOrigSaved,
+        arrHorariosOrig: this.state.arrHorariosOrigSaved
+      };
+    }
+
     const arrJornadasOrig = [];
     const arrHorariosOrig = [];
     let contador = 1;
@@ -188,7 +419,7 @@ class GrifoCheck {
     const today = new Date();
     const strHoje = GrifoUtils.formatDate(today, 'dd/MM/yy');
 
-    // Remove old containers
+    // Remove old containers (only on first load)
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}, .${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}`).remove();
 
     const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
@@ -200,14 +431,12 @@ class GrifoCheck {
       // Process schedules (jornadas)
       arrJornadasOrig.push(this.getJornadaDiaOrig($row));
       $row.find('td:eq(1)').append(
-        `<br class="${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}">` +
         `<span class="${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}" id="conteinerjornada${contador}"></span>`
       );
 
       // Process time entries (horarios)
       arrHorariosOrig.push(this.getHorariosDiaOrig($row));
-      $row.find('td:eq(2)').append(
-        `<br class="${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}">` +
+      $row.find('td:eq(2)').html(
         `<span class="${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}" id="conteinerdia${contador}"></span>`
       );
 
@@ -219,6 +448,11 @@ class GrifoCheck {
 
       contador++;
     });
+
+    // Save the original values for future use
+    this.state.arrJornadasOrigSaved = arrJornadasOrig;
+    this.state.arrHorariosOrigSaved = arrHorariosOrig;
+    debugLog('Saved original values for future recalculations');
 
     return { arrJornadasOrig, arrHorariosOrig };
   }
@@ -559,20 +793,20 @@ class GrifoCheck {
             const sinal = saldoRest <= 0 ? '+' : '-';
             strAlert = `<span class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
                               style="color:${GRIFO_CONFIG.COLORS.ERROR}">
-                          (${sinal}${horaDebito}) Saida ${saidaSugerida}
+                          (${sinal}${horaDebito}) Saída ${saidaSugerida}
                         </span>`;
             if (contadorHoje < 1) contadorErro++;
           }
         }
 
-        html += `<!--<input size="5" 
-                        class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-                        disabled 
-                        style="${cssErro ? 'background-color:' + cssErro + ';' : ''}border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;font-weight:600" 
-                        id="meuPonto${contadorDia}-${contadorBatida}-saldo" 
-                        value="${saldoBatida}">-->
-                 ${strAlert}
-                 <spam class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}">`;
+        // html += `<input size="5" 
+        //                 class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
+        //                 disabled 
+        //                 style="${cssErro ? 'background-color:' + cssErro + ';' : ''}border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;font-weight:600" 
+        //                 id="meuPonto${contadorDia}-${contadorBatida}-saldo" 
+        //                 value="${saldoBatida}">
+        //          ${strAlert}
+        //          <spam class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}">`;
 
         contadorBatida++;
       });
