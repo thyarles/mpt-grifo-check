@@ -844,8 +844,10 @@ class GrifoCheck {
    * @param {number} saldoHorarioMes - Total worked hours for month
    * @param {number} cntErro - Error count
    * @param {number} cntHoje - Today counter
+   * @param {string} ultimaEntrada - Last open check-in time for today (e.g. "08:00")
+   * @param {string} jornadaDoDia - Today's scheduled work hours (e.g. "07:00")
    */
-  executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje) {
+  executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje, ultimaEntrada = '', jornadaDoDia = '00:00') {
     debugLog('\n=== executaCalculo START ===');
     debugLog(`  saldoJornadaMesAt: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
     debugLog(`  saldoHorarioMes: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
@@ -976,7 +978,18 @@ class GrifoCheck {
                 <br>de um total de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>.
               ` : ''}
             </div>
-            ${this.state.saldoJornadaAcumHj !== 0 ? `
+            ${this.state.saldoJornadaAcumHj !== 0 ? (() => {
+              const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+              let saidaIdealHTML = '';
+              if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && Math.abs(saldoCurrentCalc) < THREE_HOURS_MS) {
+                const jornadaMs = GrifoUtils.diffDate('00:00', jornadaDoDia || '00:00');
+                const horarioSugerido = GrifoUtils.formatDate(
+                  GrifoUtils.sumDateMsec(ultimaEntrada, jornadaMs - saldoCurrentCalc),
+                  'HH:mm'
+                );
+                saidaIdealHTML = `<div style="font-size:12px;opacity:0.85;margin-top:6px;">Saída ideal: <strong>${horarioSugerido}</strong></div>`;
+              }
+              return `
               <div style="margin-top:12px;
                           padding-top:12px;
                           border-top:1px solid rgba(255,255,255,0.15);">
@@ -984,8 +997,10 @@ class GrifoCheck {
                 <div style="font-size:20px;font-weight:700;color:${saldoCurrentCalc < 0 ? '#FF6B6B' : '#51CF66'};">
                   ${saldoCurrentCalc < 0 ? '' : '+'}${GrifoUtils.formatMsec(saldoCurrentCalc)}
                 </div>
+                ${saidaIdealHTML}
               </div>
-            ` : ''}
+              `;
+            })() : ''}
           </div>
           
           <!-- Balance Summary -->
@@ -1256,12 +1271,31 @@ class GrifoCheck {
     // Auto-fill time entries for days with Teletrabalho observation
     this.autoFillTeletrabalho();
 
+    // Compute today's last open check-in (has check-in but no checkout)
+    let ultimaEntrada = '';
+    let jornadaDoDia = '00:00';
+    if (this.state.idxHoje > 0) {
+      const todayIdx = this.state.idxHoje - 1;
+      const todayHorarios = arrDados.arrHorarios[todayIdx] || [];
+      jornadaDoDia = arrDados.arrJornadas[todayIdx] || '00:00';
+      for (let i = todayHorarios.length - 1; i >= 0; i--) {
+        const b1 = todayHorarios[i][0];
+        const b2 = todayHorarios[i][1];
+        if (GrifoUtils.isValidTime(b1) && !GrifoUtils.isValidTime(b2)) {
+          ultimaEntrada = b1;
+          break;
+        }
+      }
+    }
+
     this.executaCalculo(
       arrResultJ.saldoJornadaMesAt,
       arrResultJ.saldoCurrent,
       arrResultH.saldoHorarioMes,
       arrResultH.cnt_erro,
-      arrResultH.cnt_hoje
+      arrResultH.cnt_hoje,
+      ultimaEntrada,
+      jornadaDoDia
     );
     
     debugLog('========== GRIFO CHECK END ==========\n\n');
