@@ -972,22 +972,24 @@ class GrifoCheck {
                       backdrop-filter:blur(10px);
                       line-height:1.6;">
             <div style="font-size:13px;font-weight:400;opacity:0.95;">
-              Você esteve presente por 
+              Trabalhou  
               <strong style="font-size:15px;color:#FFD93D;">${GrifoUtils.formatMsec(saldoHorarioMes)}</strong>
               ${this.state.saldoJornadaAcumHj !== 0 ? `
-                <br>de um total de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>.
+                  de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong> até hoje.
               ` : ''}
             </div>
             ${this.state.saldoJornadaAcumHj !== 0 ? (() => {
               const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
               let saidaIdealHTML = '';
-              if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && Math.abs(saldoCurrentCalc) < THREE_HOURS_MS) {
+              if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && saldoCurrentCalc > -THREE_HOURS_MS) {
                 const jornadaMs = GrifoUtils.diffDate('00:00', jornadaDoDia || '00:00');
                 const horarioSugerido = GrifoUtils.formatDate(
                   GrifoUtils.sumDateMsec(ultimaEntrada, jornadaMs - saldoCurrentCalc),
                   'HH:mm'
                 );
-                saidaIdealHTML = `<div style="font-size:12px;opacity:0.85;margin-top:6px;">Saída ideal: <strong>${horarioSugerido}</strong></div>`;
+                saidaIdealHTML = `<b><div style="font-size:12px;opacity:0.85;margin-top:6px;">Saída ideal: <strong>${horarioSugerido}</strong>.</div></b>`;
+              } else { 
+                saidaIdealHTML = '<div style="font-size:12px;opacity:0.85;margin-top:6px;">Preencha <b>Teletrabalho</b> na nota dos dias remotos.</div>' 
               }
               return `
               <div style="margin-top:12px;
