@@ -980,8 +980,9 @@ class GrifoCheck {
             </div>
             ${this.state.saldoJornadaAcumHj !== 0 ? (() => {
               const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+              const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
               let saidaIdealHTML = '';
-              if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && saldoCurrentCalc > -THREE_HOURS_MS) {
+              if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && saldoCurrentCalc > -THREE_HOURS_MS && saldoCurrentCalc <= SIX_HOURS_MS) {
                 const jornadaMs = GrifoUtils.diffDate('00:00', jornadaDoDia || '00:00');
                 const horarioSugerido = GrifoUtils.formatDate(
                   GrifoUtils.sumDateMsec(ultimaEntrada, jornadaMs - saldoCurrentCalc),
