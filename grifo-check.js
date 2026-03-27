@@ -814,8 +814,10 @@ class GrifoCheck {
       // Apply 10-hour daily cap
       let cappedWarning = '';
       if (saldoHorarioDiaRaw > MAX_DAILY_HOURS_MS) {
-        const extraHours = GrifoUtils.formatMsec(saldoHorarioDiaRaw - MAX_DAILY_HOURS_MS);
+        const extraMs = saldoHorarioDiaRaw - MAX_DAILY_HOURS_MS;
+        const extraHours = GrifoUtils.formatMsec(extraMs);
         saldoHorarioDia = MAX_DAILY_HOURS_MS;
+        saldoHorarioMes -= extraMs;
         cappedWarning = `<br><span class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" style="color:${GRIFO_CONFIG.COLORS.ERROR};font-size:11px">⚠ Limitado a 10h (${extraHours} ignorado)</span>`;
         debugLog(`  Day ${contadorDia}: Capped at 10h, ignored ${extraHours}`);
       }
@@ -890,8 +892,8 @@ class GrifoCheck {
     debugLog(`  saldoCurrentCalc: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
 
     // Remove existing container and store position
-    let top = '10px';
-    let left = 'calc(50% - 150px)';
+    let top = '60px';
+    let left = 'calc(77% - 150px)';
     const existingContainer = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`);
 
     if (existingContainer.length) {
@@ -975,7 +977,7 @@ class GrifoCheck {
               Trabalhou  
               <strong style="font-size:15px;color:#FFD93D;">${GrifoUtils.formatMsec(saldoHorarioMes)}</strong>
               ${this.state.saldoJornadaAcumHj !== 0 ? `
-                  de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong> até hoje.
+                  de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>.
               ` : ''}
             </div>
             ${this.state.saldoJornadaAcumHj !== 0 ? (() => {
