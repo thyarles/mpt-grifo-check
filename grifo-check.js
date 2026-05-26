@@ -848,8 +848,9 @@ class GrifoCheck {
    * @param {number} cntHoje - Today counter
    * @param {string} ultimaEntrada - Last open check-in time for today (e.g. "08:00")
    * @param {string} jornadaDoDia - Today's scheduled work hours (e.g. "07:00")
+   * @param {number} horasTrabalhadasHojeMs - Milliseconds already worked today in closed intervals (before ultimaEntrada)
    */
-  executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje, ultimaEntrada = '', jornadaDoDia = '00:00') {
+  executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje, ultimaEntrada = '', jornadaDoDia = '00:00', horasTrabalhadasHojeMs = 0) {
     debugLog('\n=== executaCalculo START ===');
     debugLog(`  saldoJornadaMesAt: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
     debugLog(`  saldoHorarioMes: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
@@ -986,11 +987,16 @@ class GrifoCheck {
               let saidaIdealHTML = '';
               if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && saldoCurrentCalc > -THREE_HOURS_MS && saldoCurrentCalc <= SIX_HOURS_MS) {
                 const jornadaMs = GrifoUtils.diffDate('00:00', jornadaDoDia || '00:00');
-                const horarioSugerido = GrifoUtils.formatDate(
-                  GrifoUtils.sumDateMsec(ultimaEntrada, jornadaMs - saldoCurrentCalc),
-                  'HH:mm'
-                );
-                saidaIdealHTML = `<b><div style="font-size:12px;opacity:0.85;margin-top:6px;">Saída ideal: <strong>${horarioSugerido}</strong>.</div></b>`;
+                const remainingMs = jornadaMs - horasTrabalhadasHojeMs - saldoCurrentCalc;
+                if (remainingMs > 0) {
+                  const horarioSugerido = GrifoUtils.formatDate(
+                    GrifoUtils.sumDateMsec(ultimaEntrada, remainingMs),
+                    'HH:mm'
+                  );
+                  saidaIdealHTML = `<b><div style="font-size:12px;opacity:0.85;margin-top:6px;">Saída ideal: <strong>${horarioSugerido}</strong>.</div></b>`;
+                } else {
+                  saidaIdealHTML = '<div style="font-size:12px;opacity:0.85;margin-top:6px;">Você está trabalhando demais, não acha?</div>';
+                }
               } else { 
                 saidaIdealHTML = '<div style="font-size:12px;opacity:0.85;margin-top:6px;">Preencha <b>Teletrabalho</b> na nota dos dias remotos.</div>' 
               }
@@ -1279,6 +1285,7 @@ class GrifoCheck {
     // Compute today's last open check-in (has check-in but no checkout)
     let ultimaEntrada = '';
     let jornadaDoDia = '00:00';
+    let horasTrabalhadasHojeMs = 0;
     if (this.state.idxHoje > 0) {
       const todayIdx = this.state.idxHoje - 1;
       const todayHorarios = arrDados.arrHorarios[todayIdx] || [];
@@ -1291,6 +1298,14 @@ class GrifoCheck {
           break;
         }
       }
+      // Sum hours already worked today in closed intervals (e.g. before lunch break)
+      todayHorarios.forEach(batida => {
+        const b1 = batida[0];
+        const b2 = batida[1];
+        if (GrifoUtils.isValidTime(b1) && GrifoUtils.isValidTime(b2)) {
+          horasTrabalhadasHojeMs += GrifoUtils.diffDate(b1, b2);
+        }
+      });
     }
 
     this.executaCalculo(
@@ -1300,7 +1315,8 @@ class GrifoCheck {
       arrResultH.cnt_erro,
       arrResultH.cnt_hoje,
       ultimaEntrada,
-      jornadaDoDia
+      jornadaDoDia,
+      horasTrabalhadasHojeMs
     );
     
     debugLog('========== GRIFO CHECK END ==========\n\n');
