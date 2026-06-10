@@ -1,7 +1,7 @@
 ﻿{
   "manifest_version": 3,
   "name": "MPT Grifo Check",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Calcula o saldo do Grifo.",
   "icons": {
     "16": "images/MPT-Grifo-16.png",
@@ -20,7 +20,8 @@
   "content_scripts": [
     {
       "matches": [
-        "*://grifo.mpt.mp.br/*"
+        "*://grifo.mpt.mp.br/*",
+        "*://acesso-sec.mpt.mp.br/f5-w-68747470733a2f2f677269666f2e6d70742e6d702e6272$$/*"
       ],
       "js": [
         "jquery-3.2.1.min.js",
