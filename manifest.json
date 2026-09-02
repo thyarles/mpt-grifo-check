@@ -1,4 +1,4 @@
-﻿{
+{
   "manifest_version": 3,
   "name": "MPT Grifo Check",
   "version": "1.1.0",
@@ -24,10 +24,9 @@
         "*://acesso-sec.mpt.mp.br/f5-w-68747470733a2f2f677269666f2e6d70742e6d702e6272$$/*"
       ],
       "js": [
-        "jquery-3.2.1.min.js",
+        "jquery-3.7.1.min.js",
         "js-cookie.min.js",
         "jquery.mask.min.js",
-        "jquery-ui.min.js",
         "constants.js",
         "utils.js",
         "grifo-check.js"

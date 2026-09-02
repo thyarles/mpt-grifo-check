@@ -1055,7 +1055,7 @@ class GrifoCheck {
       tableHeader.append(containerHTML);
     }
 
-    $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).draggable();
+    this.makeDraggable($(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`)[0]);
 
     this.logCalculation({
       saldoJornadaMesAt, saldoHorarioMes, saldoCurrentCalc, faltaSobra,
@@ -1071,7 +1071,8 @@ class GrifoCheck {
    */
   logCalculation(vm) {
     if (!DEBUG) return;
-    const f = GrifoUtils.formatMsec;
+    // Arrow, not a bare reference: formatMsec uses `this`, so detaching it throws
+    const f = ms => GrifoUtils.formatMsec(ms);
     debugLog('\n--- CALCULATION SUMMARY ---');
     debugLog(`  Jornada Total: ${f(vm.saldoJornadaMesAt)}`);
     debugLog(`  Horas Trabalhadas: ${f(vm.saldoHorarioMes)}`);
@@ -1082,6 +1083,53 @@ class GrifoCheck {
     debugLog(`  Saldo Final: ${f(vm.saldoHorarioMes - vm.saldoJornadaMesAt + vm.saldoBHoras)}`);
     debugLog(`  Erros: ${vm.cntErro}`);
     debugLog('=== executaCalculo END ===\n');
+  }
+
+  /**
+   * Make the panel draggable with pointer events.
+   * Replaces jQuery UI's .draggable(), which was the only thing 253KB of
+   * jquery-ui was being loaded for.
+   * @param {HTMLElement} el - Element to drag
+   */
+  makeDraggable(el) {
+    if (!el) return;
+
+    let startX = 0;
+    let startY = 0;
+    let originLeft = 0;
+    let originTop = 0;
+
+    const onMove = event => {
+      const left = originLeft + (event.clientX - startX);
+      const top = originTop + (event.clientY - startY);
+      // Keep a grabbable edge on screen whatever the drag does
+      el.style.left = `${Math.max(0, Math.min(left, window.innerWidth - 120))}px`;
+      el.style.top = `${Math.max(0, Math.min(top, window.innerHeight - 60))}px`;
+    };
+
+    const onUp = event => {
+      el.releasePointerCapture?.(event.pointerId);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+    };
+
+    el.addEventListener('pointerdown', event => {
+      // Never start a drag from the button or an input inside the panel
+      if (event.button !== 0 || event.target.closest('button, input, a')) return;
+
+      const rect = el.getBoundingClientRect();
+      startX = event.clientX;
+      startY = event.clientY;
+      originLeft = rect.left;
+      originTop = rect.top;
+
+      el.setPointerCapture?.(event.pointerId);
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
+      event.preventDefault();   // stop the browser starting a text selection
+    });
   }
 
   /**

@@ -55,10 +55,12 @@ The extension will be available on the Chrome Web Store.
 ├── constants.js          # Configuration and constants
 ├── utils.js              # Utility functions
 ├── grifo-check.js        # Main application logic
-├── jquery-3.2.1.min.js   # jQuery library
-├── icons/                # Extension icons
-│   ├── icone.png
-│   └── icone.svg
+├── panel.css             # Styles for the injected panel and toggle
+├── jquery-3.7.1.min.js   # jQuery library
+├── js-cookie.min.js      # Cookie helper
+├── jquery.mask.min.js    # Input masking
+├── utils.test.js         # Unit tests (node --test)
+├── images/               # Extension icons
 └── README.md             # This file
 ```
 
@@ -101,11 +103,11 @@ Contributions are welcome! Please:
 
 ## License
 
-[Specify your license here]
+Internal tool for MPT. No license specified.
 
 ## Version History
 
-### 0.1.0 (Current)
+### 1.1.0 (Current)
 - Refactored to Chrome Manifest V3
 - Modern ES6+ JavaScript
 - Modular code architecture

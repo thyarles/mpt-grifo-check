@@ -138,3 +138,16 @@ test('pad left-fills to the requested width', () => {
 test('trimArray trims every element', () => {
   assert.deepEqual(U.trimArray([' a ', 'b  ', '  c']), ['a', 'b', 'c']);
 });
+
+test('formatMsec still works when the method is detached', () => {
+  // A bare `const f = GrifoUtils.formatMsec` throws, because formatMsec calls
+  // this.pad(). That broke every input handler for a whole commit, but only
+  // when DEBUG was on, so nothing else caught it.
+  // Note: the error crosses a vm realm boundary, so it is not `instanceof` the
+  // host's TypeError - match on the message instead.
+  const detached = U.formatMsec;
+  assert.throws(() => detached(3600000), /pad/,
+    'detaching is expected to throw - bind or wrap it at the call site');
+  const wrapped = ms => U.formatMsec(ms);
+  assert.equal(wrapped(3600000), '01:00');
+});
