@@ -836,13 +836,8 @@ class GrifoCheck {
                         value="${GrifoUtils.escapeHtml(b2)}" 
                         val-orig="${GrifoUtils.escapeHtml(b2Orig)}">`;
 
-        let saldoBatida = '';
-        let cssErro = '';
-        let strAlert = '';
-
         if (GrifoUtils.isValidTime(b1) && GrifoUtils.isValidTime(b2)) {
           const batidaDiff = GrifoUtils.diffDate(b1, b2);
-          saldoBatida = GrifoUtils.formatMsec(batidaDiff);
           saldoHorarioDiaRaw += batidaDiff;
           saldoHorarioDia += batidaDiff;
 
@@ -857,36 +852,14 @@ class GrifoCheck {
           }
 
           saldoHorarioMes += isCompleteForToday ? GrifoUtils.diffDate(b1, b2) : 0;
-        } else {
-          const saldoRest = jornadaDia - (saldoHorarioDia || 0);
-          const horaDebito = GrifoUtils.formatMsec(Math.abs(saldoRest));
-
-          cssErro = contadorHoje > 0 ?
-            GRIFO_CONFIG.COLORS.DISABLED :
-            (saldoRest > 0 ? GRIFO_CONFIG.COLORS.ERROR : GRIFO_CONFIG.COLORS.LIGHT_ERROR);
-
-          if (GrifoUtils.isValidTime(b1) || GrifoUtils.isValidTime(b2)) {
-            const saidaSugerida = GrifoUtils.formatDate(
-              GrifoUtils.sumDateMsec(b1, saldoRest),
-              'HH:mm'
-            );
-            const sinal = saldoRest <= 0 ? '+' : '-';
-            strAlert = `<span class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-                              style="color:${GRIFO_CONFIG.COLORS.ERROR}">
-                          (${sinal}${horaDebito}) Saída ${saidaSugerida}
-                        </span>`;
-            if (contadorHoje < 1) contadorErro++;
-          }
+        } else if (GrifoUtils.isValidTime(b1) || GrifoUtils.isValidTime(b2)) {
+          // Exactly one of the pair is filled: the day needs correcting, unless
+          // it is today and still in progress. The per-batida saldo box that
+          // used to render here was disabled long ago; everything that fed it
+          // has been removed (see git history to restore it).
+          if (contadorHoje < 1) contadorErro++;
         }
 
-        // html += `<input size="5" 
-        //                 class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-        //                 disabled 
-        //                 style="${cssErro ? 'background-color:' + cssErro + ';' : ''}border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;font-weight:600" 
-        //                 id="meuPonto${contadorDia}-${contadorBatida}-saldo" 
-        //                 value="${saldoBatida}">
-        //          ${strAlert}
-        //          <spam class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}">`;
 
         contadorBatida++;
       });
@@ -996,10 +969,6 @@ class GrifoCheck {
 
     const faltaSobra = saldoJornadaMesAt > saldoHorarioMes ? 'Falta' : 'Sobra';
     const colorDiff = saldoJornadaMesAt - saldoHorarioMes > 0 ?
-      '#FF6B6B' :  // Bright red for negative
-      '#51CF66';   // Bright green for positive
-
-    const colorCurrent = saldoCurrentCalc < 0 ?
       '#FF6B6B' :  // Bright red for negative
       '#51CF66';   // Bright green for positive
 
