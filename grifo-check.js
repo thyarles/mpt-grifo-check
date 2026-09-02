@@ -252,11 +252,10 @@ class GrifoCheck {
 
     debugLog('Clicking Consultar button...');
     setTimeout(() => {
-      // Native click, not jQuery's. jQuery's .click() invokes the element's
-      // inline onclick handler itself and then calls the native .click()
-      // method, which fires a real event that runs that handler a second time.
-      // On this page the handler submits the form, so the jQuery version
-      // submitted twice - the double reload.
+      // Native click rather than jQuery's .click(). Measured against the live
+      // page: both produce exactly one navigation, so this is NOT a fix for
+      // double submission - jQuery guards its own re-dispatch. Kept only
+      // because it is the more direct call.
       $consultarBtn[0].click();
     }, 200);
     return true;
@@ -990,10 +989,12 @@ class GrifoCheck {
     const existingContainer = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`);
 
     if (existingContainer.length) {
-      // getBoundingClientRect, not .position(): the panel is position:fixed, so it
-      // is laid out in viewport coordinates, while .position() reports offsets
-      // relative to the offset parent - reapplying those made the panel creep on
-      // every recalculation. Clamp too, so a resize cannot strand it off-screen.
+      // getBoundingClientRect() is the coordinate space these fixed-position
+      // top/left values are consumed in. Note jQuery's .position() special-cases
+      // position:fixed and returns the same numbers - measured identical on the
+      // live page - so this is NOT a drift fix, despite appearances. The clamp
+      // is the part that earns its keep: it stops a window resize from
+      // stranding the panel off-screen.
       const rect = existingContainer[0].getBoundingClientRect();
       top = `${Math.max(0, Math.min(rect.top, window.innerHeight - 60))}px`;
       left = `${Math.max(0, Math.min(rect.left, window.innerWidth - 120))}px`;
