@@ -217,14 +217,13 @@ class GrifoCheck {
     $('#grifo-toggle').off('change').on('change', (e) => {
       const isChecked = $(e.target).is(':checked');
       
-      if (!isChecked && this.state.enabled) {
-        // User is disabling the extension (no confirmation)
-        this.disable();
-        this.clickConsultarButton();
-      } else if (isChecked && !this.state.enabled) {
-        // User is enabling the extension (no confirmation)
+      if (isChecked === this.state.enabled) return;
+
+      // enable()/disable() handle the reload themselves
+      if (isChecked) {
         this.enable();
-        this.clickConsultarButton();
+      } else {
+        this.disable();
       }
     });
   }
@@ -235,14 +234,21 @@ class GrifoCheck {
   clickConsultarButton() {
     // Find the Consultar button by its attributes
     const $consultarBtn = $('button[name="botao_operacao"][value="consultar"]');
-    if ($consultarBtn.length > 0) {
-      debugLog('Clicking Consultar button...');
-      setTimeout(() => {
-        $consultarBtn.click();
-      }, 200);
-    } else {
+    if ($consultarBtn.length === 0) {
       debugLog('Consultar button not found');
+      return false;
     }
+
+    debugLog('Clicking Consultar button...');
+    setTimeout(() => {
+      // Native click, not jQuery's. jQuery's .click() invokes the element's
+      // inline onclick handler itself and then calls the native .click()
+      // method, which fires a real event that runs that handler a second time.
+      // On this page the handler submits the form, so the jQuery version
+      // submitted twice - the double reload.
+      $consultarBtn[0].click();
+    }, 200);
+    return true;
   }
 
   /**
@@ -276,7 +282,13 @@ class GrifoCheck {
     debugLog('Enabling Grifo Check...');
     this.state.enabled = true;
     this.saveEnabledState();
-    this.init();
+
+    // Same reasoning as disable(): the reload re-runs the whole extension from
+    // a clean page, so initialising here as well would just paint a panel that
+    // is discarded a moment later.
+    if (!this.clickConsultarButton()) {
+      this.init();
+    }
   }
 
   /**
@@ -286,17 +298,27 @@ class GrifoCheck {
     debugLog('Disabling Grifo Check...');
     this.state.enabled = false;
     this.saveEnabledState();
-    
     this.stopMonitoring();
 
-    // Remove all UI elements
+    // A reload is the only way to get the original punch cells back, since
+    // getDadosMesOrig replaces them with our own containers. Only tear down by
+    // hand when we cannot reload - doing both would render a frame that the
+    // reload throws away 200ms later, which is the visible blink.
+    if (!this.clickConsultarButton()) {
+      this.removeInjectedUi();
+    }
+  }
+
+  /**
+   * Remove every element the extension injected into the page
+   */
+  removeInjectedUi() {
     $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.MINHA_JORNADA}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.MEU_SALDO}`).remove();
-    
     debugLog('All UI elements removed');
   }
 
