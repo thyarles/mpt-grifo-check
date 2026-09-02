@@ -69,7 +69,6 @@ class GrifoCheck {
   constructor() {
     this.state = {
       saldoJornadaMesAt: 0,
-      saldoCurrent: 0,
       saldoJornadaAcumHj: 0,
       idxHoje: 0,
       totalDias: 0,
@@ -161,10 +160,10 @@ class GrifoCheck {
         
         debugLog('Toggle added to historico');
       }
-    }, 100);
-    
-    // Stop checking after 10 seconds
-    setTimeout(() => clearInterval(checkHistorico), 10000);
+    }, GRIFO_CONFIG.TIME.TOGGLE_POLL_INTERVAL);
+
+    // Give up waiting for the page to render the toolbar
+    setTimeout(() => clearInterval(checkHistorico), GRIFO_CONFIG.TIME.TOGGLE_POLL_TIMEOUT);
   }
 
   /**
@@ -381,35 +380,14 @@ class GrifoCheck {
 
     if (!resultSection || containerExists) return;
 
-    // Try to get user name from page to verify it matches
-    let pageUserName = '';
-    let $userElement = null;
-    
-    // Method 1: Try input field (old method)
-    $userElement = $(GRIFO_CONFIG.SELECTORS.EDIT_PESSOA);
-    if ($userElement.length > 0) {
-      pageUserName = $userElement.val().trim().toUpperCase();
-      debugLog(`checkAndStart: Found user via input[name=_pessoa]: "${pageUserName}"`);
-    }
-    
-    // Method 2: Try div[4] path provided by user
-    if (!pageUserName) {
-      $userElement = $('body > div:eq(3) > div:eq(0) > table > tbody > tr:eq(1) > td > font > b');
-      if ($userElement.length > 0) {
-        pageUserName = $userElement.text().trim().toUpperCase();
-        debugLog(`checkAndStart: Found user via div[4] path: "${pageUserName}"`);
-      }
-    }
-    
-    // Method 3: Try without tbody
-    if (!pageUserName) {
-      $userElement = $('body > div:eq(3) > div:eq(0) > table > tr:eq(1) > td > font > b');
-      if ($userElement.length > 0) {
-        pageUserName = $userElement.text().trim().toUpperCase();
-        debugLog(`checkAndStart: Found user via div[4] path (no tbody): "${pageUserName}"`);
-      }
-    }
-    
+    // Three shapes the name has appeared in across Grifo versions
+    const pageUserName = GrifoUtils.firstMatch([
+      () => $(GRIFO_CONFIG.SELECTORS.EDIT_PESSOA).val()?.trim().toUpperCase() || '',
+      () => GrifoUtils.safeText($(GRIFO_CONFIG.SELECTORS.HEADER_NAME_ALT)).toUpperCase(),
+      () => GrifoUtils.safeText($(GRIFO_CONFIG.SELECTORS.HEADER_NAME_ALT_NO_TBODY)).toUpperCase()
+    ]);
+    debugLog(`checkAndStart: pageUserName="${pageUserName}"`);
+
     // If no user element found, proceed anyway (some pages might not have it)
     const shouldProceed = !pageUserName || (pageUserName === this.state.strNome.trim());
     
@@ -763,7 +741,7 @@ class GrifoCheck {
     this.state.saldoJornadaMesAt = saldoJornadaMesAt;
     this.state.saldoJornadaAcumHj = saldoJornadaAcumHj;
 
-    return { saldoJornadaMesAt, saldoCurrent: this.state.saldoCurrent };
+    return { saldoJornadaMesAt };
   }
 
   /**
@@ -865,7 +843,7 @@ class GrifoCheck {
       contadorDia++;
     });
 
-    return { saldoHorarioMes, cnt_erro: contadorErro, cnt_hoje: contadorHoje };
+    return { saldoHorarioMes, cntErro: contadorErro, cntHoje: contadorHoje };
   }
 
   /**
@@ -932,51 +910,45 @@ class GrifoCheck {
   }
 
   /**
+   * Find a value cell by the text of the label cell next to it
+   * @param {string} rowSelector - Selector matching candidate rows
+   * @param {string} label - Substring to look for in the first cell
+   * @returns {string} The second cell's text, or ''
+   */
+  findRowValueByLabel(rowSelector, label) {
+    let value = '';
+    $(rowSelector).each((index, row) => {
+      const $row = $(row);
+      if ($row.find('td:eq(0)').text().trim().includes(label)) {
+        value = $row.find('td:eq(1)').text().trim();
+        return false; // break
+      }
+    });
+    return value;
+  }
+
+  /**
    * Execute all calculations and display results
    * @param {number} saldoJornadaMesAt - Total work schedule for month
-   * @param {number} saldoCurrent - Current balance
    * @param {number} saldoHorarioMes - Total worked hours for month
    * @param {number} cntErro - Error count
-   * @param {number} cntHoje - Today counter
    * @param {string} ultimaEntrada - Last open check-in time for today (e.g. "08:00")
    * @param {string} jornadaDoDia - Today's scheduled work hours (e.g. "07:00")
    * @param {number} horasTrabalhadasHojeMs - Milliseconds already worked today in closed intervals (before ultimaEntrada)
    */
-  executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje, ultimaEntrada = '', jornadaDoDia = '00:00', horasTrabalhadasHojeMs = 0) {
+  executaCalculo(saldoJornadaMesAt, saldoHorarioMes, cntErro, ultimaEntrada = '', jornadaDoDia = '00:00', horasTrabalhadasHojeMs = 0) {
     debugLog('\n=== executaCalculo START ===');
     debugLog(`  saldoJornadaMesAt: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
     debugLog(`  saldoHorarioMes: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
     debugLog(`  saldoJornadaAcumHj: ${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}`);
     
-    // Try multiple methods to get previous balance
-    let previousBalanceText = '';
-    let $balanceElement = null;
-    
-    // Method 1: Original selector
-    $balanceElement = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE);
-    previousBalanceText = GrifoUtils.safeText($balanceElement);
-    debugLog(`  Method 1 (original selector): "${previousBalanceText}"`);
-    
-    // Method 2: Without tbody (Chrome compatibility)
-    if (!previousBalanceText) {
-      $balanceElement = $('#divSecaoSaldoMesAnterior > fieldset > table > tr:eq(0) > td:eq(1)');
-      previousBalanceText = GrifoUtils.safeText($balanceElement);
-      debugLog(`  Method 2 (no tbody): "${previousBalanceText}"`);
-    }
-    
-    // Method 3: Find by text content
-    if (!previousBalanceText) {
-      $('#divSecaoSaldoMesAnterior table tr').each((index, row) => {
-        const $row = $(row);
-        const firstCell = $row.find('td:eq(0)').text().trim();
-        if (firstCell.includes('Banco de horas anterior')) {
-          previousBalanceText = $row.find('td:eq(1)').text().trim();
-          debugLog(`  Method 3 (find by text): "${previousBalanceText}"`);
-          return false; // break
-        }
-      });
-    }
-    
+    // The balance cell has moved between Grifo versions; try each known shape
+    const previousBalanceText = GrifoUtils.firstMatch([
+      GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE,
+      GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE_NO_TBODY,
+      () => this.findRowValueByLabel('#divSecaoSaldoMesAnterior table tr', 'Banco de horas anterior')
+    ]);
+
     debugLog(`  Final previousBalanceText: "${previousBalanceText}"`);
     const saldoBHoras = GrifoUtils.diffHoraMsec(previousBalanceText);
     debugLog(`  saldoBHoras (in msec): ${saldoBHoras} (${GrifoUtils.formatMsec(saldoBHoras)})`);
@@ -1269,7 +1241,7 @@ class GrifoCheck {
       arrDados.arrHorariosOrig
     );
     debugLog(`  Result - saldoHorarioMes: ${GrifoUtils.formatMsec(arrResultH.saldoHorarioMes)}`);
-    debugLog(`  Result - cnt_erro: ${arrResultH.cnt_erro}, cnt_hoje: ${arrResultH.cnt_hoje}`);
+    debugLog(`  Result - cntErro: ${arrResultH.cntErro}, cntHoje: ${arrResultH.cntHoje}`);
 
     // Auto-fill time entries for days with Teletrabalho observation
     this.autoFillTeletrabalho();
@@ -1302,10 +1274,8 @@ class GrifoCheck {
 
     this.executaCalculo(
       arrResultJ.saldoJornadaMesAt,
-      arrResultJ.saldoCurrent,
       arrResultH.saldoHorarioMes,
-      arrResultH.cnt_erro,
-      arrResultH.cnt_hoje,
+      arrResultH.cntErro,
       ultimaEntrada,
       jornadaDoDia,
       horasTrabalhadasHojeMs
@@ -1321,7 +1291,7 @@ if (typeof jQuery !== 'undefined') {
     // Small delay to ensure page is fully loaded
     setTimeout(() => {
       window.grifoCheck = new GrifoCheck();
-    }, 1000);
+    }, GRIFO_CONFIG.TIME.BOOT_DELAY);
   });
 } else {
   console.error('Grifo Check: jQuery is not loaded');

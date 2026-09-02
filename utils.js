@@ -4,6 +4,29 @@
  * Utility functions for Grifo Check extension
  */
 const GrifoUtils = {
+  // Arbitrary shared day: only the time-of-day part ever matters
+  BASE_DATE: '2015-08-05',
+
+  /**
+   * Return the first non-empty result from a list of lookups.
+   * Each candidate is a selector string, or a function returning a string.
+   * @param {Array<string|Function>} candidates - Tried in order
+   * @returns {string} The first non-empty value, or ''
+   */
+  firstMatch(candidates) {
+    for (const candidate of candidates) {
+      try {
+        const value = typeof candidate === 'function'
+          ? candidate()
+          : this.safeText($(candidate));
+        if (value) return value;
+      } catch (error) {
+        console.error('firstMatch candidate failed:', error);
+      }
+    }
+    return '';
+  },
+
   /**
    * Calculate time difference between two times in milliseconds
    * @param {string} time1 - First time in format "HH:mm"
@@ -12,14 +35,21 @@ const GrifoUtils = {
    */
   diffDate(time1, time2) {
     try {
-      const baseDate = '2015-08-05';
-      const date1 = new Date(`${baseDate} ${time1}:00`);
-      const date2 = new Date(`${baseDate} ${time2}:00`);
-      return date2.getTime() - date1.getTime();
+      return this.toDate(time2).getTime() - this.toDate(time1).getTime();
     } catch (error) {
       console.error('Error calculating time difference:', error);
       return 0;
     }
+  },
+
+  /**
+   * Turn "HH:mm" into a Date on a fixed arbitrary day, so two times can be
+   * compared or offset without any calendar involved
+   * @param {string} time - Time in format "HH:mm"
+   * @returns {Date} Date on the shared base day
+   */
+  toDate(time) {
+    return new Date(`${this.BASE_DATE} ${time}:00`);
   },
 
   /**
@@ -67,9 +97,7 @@ const GrifoUtils = {
    */
   sumDateMsec(time, msec) {
     try {
-      const baseDate = '2015-08-05';
-      const date = new Date(`${baseDate} ${time}:00`);
-      return date.getTime() + msec;
+      return this.toDate(time).getTime() + msec;
     } catch (error) {
       console.error('Error adding milliseconds to time:', error);
       return 0;

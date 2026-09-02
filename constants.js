@@ -9,7 +9,14 @@ const GRIFO_CONFIG = {
     ONE_HOUR: 3600000,
     COOKIE_EXPIRY_DAYS: 10000,
     CHECK_INTERVAL: 5000,
-    RECALC_DELAY: 100
+    RECALC_DELAY: 100,
+    // Let the page settle before first injecting anything
+    BOOT_DELAY: 1000,
+    // Waiting for div.historico to exist so the toggle can be attached
+    TOGGLE_POLL_INTERVAL: 100,
+    TOGGLE_POLL_TIMEOUT: 10000,
+    // Small gap before submitting, so the enabled flag is committed first
+    CONSULTAR_DELAY: 200
   },
 
   // Business rules (policy, not arithmetic - these are institutional limits)
@@ -31,10 +38,14 @@ const GRIFO_CONFIG = {
   // DOM Selectors (cached for performance)
   SELECTORS: {
     HEADER_NAME: '#cabecalho > div > table:eq(0) > tbody > tr:eq(1) > td:eq(0)',
+    // Fallbacks for the logged-in user's name, older layouts first
+    HEADER_NAME_ALT: 'body > div:eq(3) > div:eq(0) > table > tbody > tr:eq(1) > td > font > b',
+    HEADER_NAME_ALT_NO_TBODY: 'body > div:eq(3) > div:eq(0) > table > tr:eq(1) > td > font > b',
     DATE_INPUT: 'input[name=data]',
     EDIT_PESSOA: 'input[name=_pessoa]',
     RESULT_SECTION: '#divSecaoResult .titulosecao_table',
     PREVIOUS_BALANCE: '#divSecaoSaldoMesAnterior > fieldset > table > tbody > tr:eq(0) > td:eq(1)',
+    PREVIOUS_BALANCE_NO_TBODY: '#divSecaoSaldoMesAnterior > fieldset > table > tr:eq(0) > td:eq(1)',
     TABLE_ROWS: 'table.tabela:eq(1) > tbody > tr',
     TABLE_HEADER: 'table.tabela:eq(1) thead tr:eq(0) th:eq(3)'
   },
@@ -59,12 +70,8 @@ const GRIFO_CONFIG = {
     HIGHLIGHT: '#FFF9C4',
     WHITE: '#FFF',
     ERROR: '#F44336',
-    SUCCESS: '#4CAF50',
     DISABLED: '#E0E0E0',
-    LIGHT_ERROR: '#FFEBEE',
-    PRIMARY: '#990000',
-    SECONDARY: '#23439D',
-    BACKGROUND: '#EEE'
+    LIGHT_ERROR: '#FFEBEE'
   },
 
   // SVG Logo (base64 encoded)
