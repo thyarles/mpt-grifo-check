@@ -12,6 +12,15 @@ const GRIFO_CONFIG = {
     RECALC_DELAY: 100
   },
 
+  // Business rules (policy, not arithmetic - these are institutional limits)
+  RULES: {
+    // Hours beyond this in a single day are discarded from the monthly total
+    MAX_DAILY_HOURS_MS: 10 * 3600000,
+    // Outside this band around the current balance, no exit time is suggested
+    SAIDA_IDEAL_MIN_MS: -3 * 3600000,
+    SAIDA_IDEAL_MAX_MS: 6 * 3600000
+  },
+
   // Regex patterns
   PATTERNS: {
     TIME_FORMAT: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/,
