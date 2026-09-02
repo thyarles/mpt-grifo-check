@@ -888,7 +888,13 @@ class GrifoCheck {
     debugLog(`  Final previousBalanceText: "${previousBalanceText}"`);
     const saldoBHoras = GrifoUtils.diffHoraMsec(previousBalanceText);
     debugLog(`  saldoBHoras (in msec): ${saldoBHoras} (${GrifoUtils.formatMsec(saldoBHoras)})`);
-    
+
+    // Grifo shows "(Aguardando Fechamento da Freqüência)" instead of a time when
+    // the previous month is still open, so there is no bank balance to display yet
+    const bancoPendente = previousBalanceText !== '' &&
+      !GRIFO_CONFIG.PATTERNS.BALANCE_FORMAT.test(previousBalanceText);
+    debugLog(`  bancoPendente: ${bancoPendente}`);
+
     const saldoCurrentCalc = saldoHorarioMes - this.state.saldoJornadaAcumHj;
     debugLog(`  saldoCurrentCalc: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
 
@@ -1047,6 +1053,23 @@ class GrifoCheck {
                 </div>
                 <div style="font-size:16px;font-weight:700;color:${colorBanco};">
                   ${previousBalanceText}
+                </div>
+              </div>
+            ` : bancoPendente ? `
+              <div title="${previousBalanceText}"
+                   style="background:rgba(255,255,255,0.1);
+                          border-radius:10px;
+                          padding:12px;
+                          backdrop-filter:blur(10px);
+                          text-align:center;">
+                <div style="font-size:10px;opacity:0.8;margin-bottom:4px;text-transform:uppercase;">
+                  Banco
+                </div>
+                <div style="font-size:16px;font-weight:700;color:#FFD93D;">
+                  &mdash;&nbsp;:&nbsp;&mdash;
+                </div>
+                <div style="font-size:9px;opacity:0.7;margin-top:2px;">
+                  freq. não fechada
                 </div>
               </div>
             ` : ''}

@@ -14,7 +14,9 @@ const GRIFO_CONFIG = {
 
   // Regex patterns
   PATTERNS: {
-    TIME_FORMAT: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/
+    TIME_FORMAT: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/,
+    // Accumulated balance, may be negative and exceed 24h (e.g. "-139:34")
+    BALANCE_FORMAT: /^-?\d+:[0-5][0-9]$/
   },
 
   // DOM Selectors (cached for performance)
