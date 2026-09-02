@@ -4,8 +4,16 @@
  * ============================================
  * DEBUG MODE
  * ============================================
- * Toggle at runtime from the page console: grifoDebug() / grifoDebug(false).
- * The choice is remembered in localStorage, so it survives reloads.
+ * Two ways to turn logging on:
+ *
+ *   1. Flip DEBUG below and reload the extension.
+ *   2. Without touching the source, run this in the page console and reload:
+ *        localStorage.setItem('grifo-debug', '1')      // '0' to turn it off
+ *
+ * Use the localStorage form from the normal console. Content scripts run in an
+ * isolated world, so grifoDebug() is NOT reachable from the page's default
+ * console context - you would have to switch the console's context dropdown to
+ * this extension first. localStorage is shared with the page, so it always works.
  *
  * Debug logs will show:
  * - Teletrabalho auto-fill operations
@@ -15,7 +23,10 @@
  */
 let DEBUG = false;
 try {
-  DEBUG = localStorage.getItem('grifo-debug') === '1';
+  // Only override the value above when a choice has actually been stored,
+  // otherwise editing DEBUG by hand would be silently undone on every load.
+  const storedDebug = localStorage.getItem('grifo-debug');
+  if (storedDebug !== null) DEBUG = storedDebug === '1';
 } catch (error) {
   // localStorage can throw on restricted origins; stay quiet and keep DEBUG off
 }
