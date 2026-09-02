@@ -183,7 +183,9 @@ const GrifoUtils = {
   safeSelect(selector) {
     try {
       const element = $(selector);
-      if (element.length <= 0) {
+      // checkAndStart polls every 5s, so an unconditional warn here becomes an
+      // endless console flood on pages that legitimately lack the element
+      if (element.length <= 0 && typeof DEBUG !== 'undefined' && DEBUG) {
         console.warn(`Wrong select element: ${selector}`);
       }
       return element.length > 0 ? element : null;
@@ -191,6 +193,29 @@ const GrifoUtils = {
       console.error(`Error selecting element: ${selector}`, error);
       return null;
     }
+  },
+
+  /**
+   * Escape text for safe interpolation into HTML markup or an attribute value
+   * @param {*} value - Value to escape
+   * @returns {string} Escaped string
+   */
+  escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
+  /**
+   * Coerce a value to a valid "HH:mm" time or an empty string
+   * @param {*} value - Value to check
+   * @returns {string} The time if valid, otherwise ''
+   */
+  sanitizeTime(value) {
+    return this.isValidTime(value) ? value : '';
   },
 
   /**

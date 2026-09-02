@@ -4,16 +4,35 @@
  * ============================================
  * DEBUG MODE
  * ============================================
- * Set DEBUG to true to enable detailed console logging
- * Set DEBUG to false to disable all debug output
- * 
+ * Toggle at runtime from the page console: grifoDebug() / grifoDebug(false).
+ * The choice is remembered in localStorage, so it survives reloads.
+ *
  * Debug logs will show:
  * - Teletrabalho auto-fill operations
  * - Previous balance retrieval (Chrome compatibility fixes)
  * - Calculation summaries and results
  * - Step-by-step execution flow
  */
-const DEBUG = false;
+let DEBUG = false;
+try {
+  DEBUG = localStorage.getItem('grifo-debug') === '1';
+} catch (error) {
+  // localStorage can throw on restricted origins; stay quiet and keep DEBUG off
+}
+
+/**
+ * Turn debug logging on or off from the console
+ * @param {boolean} on - true to enable logging
+ */
+function grifoDebug(on = true) {
+  DEBUG = on;
+  try {
+    localStorage.setItem('grifo-debug', on ? '1' : '0');
+  } catch (error) {
+    console.warn('Grifo Check: could not persist the debug flag', error);
+  }
+  console.log(`[Grifo] debug ${on ? 'ON' : 'OFF'}`);
+}
 
 /**
  * Debug logging helper
@@ -48,10 +67,12 @@ class GrifoCheck {
       idCookiePeriodo: '',
       enabled: true,
       arrJornadasOrigSaved: null,
-      arrHorariosOrigSaved: null
+      arrHorariosOrigSaved: null,
+      periodKey: null
     };
 
     this.observer = null;
+    this.pollTimer = null;
     this.ENABLED_COOKIE_NAME = 'grifo-check-enabled';
     this.loadEnabledState();
     
@@ -69,9 +90,28 @@ class GrifoCheck {
    * Initialize the extension
    */
   init() {
+    // Idempotent: enable() calls init() again, and without this each toggle-on
+    // would leave behind an extra observer and an extra polling interval
+    this.stopMonitoring();
     this.extractUserInfo();
     this.setupObserver();
     this.startMonitoring();
+  }
+
+  /**
+   * Tear down the observer and the polling interval
+   */
+  stopMonitoring() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+      debugLog('Observer disconnected');
+    }
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+      debugLog('Polling stopped');
+    }
   }
 
   /**
@@ -136,11 +176,6 @@ class GrifoCheck {
                              box-shadow:0 2px 4px rgba(0,0,0,0.3);"></span>
               </span>
             </label>
-            <span id="grifo-toggle-status" 
-                  style="font-size:11px;
-                        font-weight:600;
-                        color:${this.state.enabled ? '#51CF66' : '#999'};">
-            </span>
           </div>
         `;
         
@@ -185,11 +220,9 @@ class GrifoCheck {
       if (!isChecked && this.state.enabled) {
         // User is disabling the extension (no confirmation)
         this.disable();
-        $('#grifo-toggle-status').css('color', '#999');
         this.clickConsultarButton();
       } else if (isChecked && !this.state.enabled) {
         // User is enabling the extension (no confirmation)
-        $('#grifo-toggle-status').css('color', '#51CF66');
         this.enable();
         this.clickConsultarButton();
       }
@@ -254,13 +287,8 @@ class GrifoCheck {
     this.state.enabled = false;
     this.saveEnabledState();
     
-    // Stop observer
-    if (this.observer) {
-      this.observer.disconnect();
-      this.observer = null;
-      debugLog('Observer disconnected');
-    }
-    
+    this.stopMonitoring();
+
     // Remove all UI elements
     $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}`).remove();
@@ -317,6 +345,30 @@ class GrifoCheck {
   }
 
   /**
+   * Detect a change of displayed period and drop everything scoped to the old one.
+   * extractUserInfo only runs from init(), so without this the cookie key and the
+   * day count stay frozen at first load and edits land under the previous month.
+   * @returns {boolean} True if the period changed
+   */
+  refreshPeriodContext() {
+    const dateInput = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.DATE_INPUT);
+    const dateValue = dateInput ? dateInput.val() : '';
+    const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
+    const periodKey = `${dateValue}|${tableRows ? tableRows.length : 0}`;
+
+    if (periodKey === this.state.periodKey) return false;
+
+    debugLog(`Period changed: "${this.state.periodKey}" -> "${periodKey}" (invalidating caches)`);
+    this.state.periodKey = periodKey;
+    this.state.arrJornadasOrigSaved = null;
+    this.state.arrHorariosOrigSaved = null;
+    this.state.idxHoje = 0;
+    this.extractUserInfo();
+
+    return true;
+  }
+
+  /**
    * Setup MutationObserver to watch for DOM changes
    */
   setupObserver() {
@@ -344,6 +396,8 @@ class GrifoCheck {
    * Check if conditions are met to start calculations
    */
   checkAndStart() {
+    if (!this.state.enabled) return;
+
     const resultSection = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.RESULT_SECTION);
     const containerExists = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).length > 0;
 
@@ -395,7 +449,9 @@ class GrifoCheck {
     this.checkAndStart();
 
     // Fallback polling for edge cases
-    setInterval(() => this.checkAndStart(), GRIFO_CONFIG.TIME.CHECK_INTERVAL);
+    if (this.pollTimer === null) {
+      this.pollTimer = setInterval(() => this.checkAndStart(), GRIFO_CONFIG.TIME.CHECK_INTERVAL);
+    }
   }
 
   /**
@@ -462,22 +518,42 @@ class GrifoCheck {
    * @param {jQuery} rowElement - Table row element
    * @returns {string} Work schedule time (e.g., "08:00")
    */
+  /**
+   * Clone a row cell, drop its images, and split it into visual lines.
+   * Empty lines are preserved on purpose - callers rely on the count to decide
+   * how many input boxes a day renders.
+   * @param {jQuery} rowElement - The table row
+   * @param {number} cellIndex - Zero-based column index
+   * @returns {string[]} Trimmed lines, with &nbsp; normalized to spaces
+   */
+  splitCellLines(rowElement, cellIndex) {
+    const cellContent = rowElement.find(`td:eq(${cellIndex})`);
+    if (!GrifoUtils.safeText(cellContent)) return [];
+
+    const content = cellContent.clone();
+    content.find('img').remove();
+
+    // Trim BEFORE converting <br>, not after. The original trimmed a string in
+    // which the separators were '#', so edge separators survived the trim and a
+    // leading/trailing <br> produced an empty line - which is one extra pair of
+    // input boxes for that day. Trimming after the conversion would eat those
+    // and silently change how many boxes render.
+    return content.html()
+      .trim()
+      .replace(/<br\s*\/?>/gi, '\n')
+      .split('\n')
+      .map(line => line.replace(/&nbsp;/gi, ' ').trim());
+  }
+
   getJornadaDiaOrig(rowElement) {
     let jornadaDia = '00:00';
 
     try {
-      const cellContent = rowElement.find('td:eq(1)');
-      if (!GrifoUtils.safeText(cellContent)) return jornadaDia;
-
-      const content = cellContent.clone();
-      content.find('img').remove();
-
-      const htmlContent = content.html().replaceAll('<br>', '#');
-      const scheduleParts = htmlContent.trim().split('#');
+      const scheduleParts = this.splitCellLines(rowElement, 1);
       let totalTime = 0;
 
       scheduleParts.forEach(part => {
-        const times = part.split(' - ').map(t => t.trim().replaceAll('&nbsp;', ''));
+        const times = part.split(' - ').map(t => t.trim());
 
         if (times.length >= 2 &&
           GrifoUtils.isValidTime(times[0]) &&
@@ -504,14 +580,7 @@ class GrifoCheck {
     const arrDiaHorarios = [];
 
     try {
-      const cellContent = rowElement.find('td:eq(2)');
-      if (!GrifoUtils.safeText(cellContent)) return arrDiaHorarios;
-
-      const content = cellContent.clone();
-      content.find('img').remove();
-
-      const htmlContent = content.html().replaceAll('<br>', '#');
-      const timeParts = htmlContent.trim().split('#');
+      const timeParts = this.splitCellLines(rowElement, 2);
 
       timeParts.forEach(part => {
         const times = part.split(' - ').map(t => t.trim());
@@ -605,8 +674,10 @@ class GrifoCheck {
           arrHorariosResult[dia][batida] = [b1, b2];
         }
       } else {
+        // Deliberately not writing back into arrHorariosOrig here: it is the cached
+        // originals array, and clobbering it would kill the "modified" highlight.
+        // setInputHorarios already reads it with optional chaining.
         arrHorariosResult[dia][0] = ['', ''];
-        arrHorariosOrig[dia][0] = ['', ''];
       }
     }
 
@@ -625,14 +696,23 @@ class GrifoCheck {
   getJornadasHorariosCookie() {
     const arrCookie = GrifoUtils.cookies.get(this.state.idCookiePeriodo);
 
-    if (arrCookie.length > 0) {
-      return {
-        arr_jornadas_ck: arrCookie[0],
-        arr_horarios_ck: arrCookie[1]
-      };
-    }
+    if (!Array.isArray(arrCookie) || arrCookie.length === 0) return {};
 
-    return {};
+    // Normalize on read. These values only ever originate from mask('00:00')
+    // inputs, so anything that is not "HH:mm" is corruption: reject it here
+    // rather than letting it reach the markup or the arithmetic.
+    const jornadas = Array.isArray(arrCookie[0]) ? arrCookie[0] : [];
+    const horarios = Array.isArray(arrCookie[1]) ? arrCookie[1] : [];
+
+    return {
+      arr_jornadas_ck: jornadas.map(jornada => GrifoUtils.sanitizeTime(jornada)),
+      arr_horarios_ck: horarios.map(dia =>
+        (Array.isArray(dia) ? dia : []).map(batida => [
+          GrifoUtils.sanitizeTime(batida?.[0]),
+          GrifoUtils.sanitizeTime(batida?.[1])
+        ])
+      )
+    };
   }
 
   /**
@@ -694,8 +774,8 @@ class GrifoCheck {
                style="background-color:${colorChange}" 
                class="${GRIFO_CONFIG.CLASSES.MINHA_JORNADA} dia${contadorDia}" 
                id="minhaJornada${contadorDia}" 
-               value="${jDia || ''}" 
-               val-orig="${jDiaOrig || ''}">
+               value="${GrifoUtils.escapeHtml(jDia)}" 
+               val-orig="${GrifoUtils.escapeHtml(jDiaOrig)}">
       `;
 
       $(`#conteinerjornada${contadorDia}`).append(html);
@@ -747,14 +827,14 @@ class GrifoCheck {
                         style="background-color:${colorB1};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;margin-right:4px" 
                         class="${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}" 
                         id="meuPonto${contadorDia}-${contadorBatida}-1" 
-                        value="${b1 || ''}" 
-                        val-orig="${b1Orig || ''}">`;
+                        value="${GrifoUtils.escapeHtml(b1)}" 
+                        val-orig="${GrifoUtils.escapeHtml(b1Orig)}">`;
         html += `<input size="5" 
                         style="background-color:${colorB2};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;margin-right:4px" 
                         class="${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}" 
                         id="meuPonto${contadorDia}-${contadorBatida}-2" 
-                        value="${b2 || ''}" 
-                        val-orig="${b2Orig || ''}">`;
+                        value="${GrifoUtils.escapeHtml(b2)}" 
+                        val-orig="${GrifoUtils.escapeHtml(b2Orig)}">`;
 
         let saldoBatida = '';
         let cssErro = '';
@@ -904,9 +984,13 @@ class GrifoCheck {
     const existingContainer = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`);
 
     if (existingContainer.length) {
-      const position = existingContainer.position();
-      top = `${position.top}px`;
-      left = `${position.left}px`;
+      // getBoundingClientRect, not .position(): the panel is position:fixed, so it
+      // is laid out in viewport coordinates, while .position() reports offsets
+      // relative to the offset parent - reapplying those made the panel creep on
+      // every recalculation. Clamp too, so a resize cannot strand it off-screen.
+      const rect = existingContainer[0].getBoundingClientRect();
+      top = `${Math.max(0, Math.min(rect.top, window.innerHeight - 60))}px`;
+      left = `${Math.max(0, Math.min(rect.left, window.innerWidth - 120))}px`;
       existingContainer.remove();
     }
 
@@ -1052,11 +1136,11 @@ class GrifoCheck {
                   Banco
                 </div>
                 <div style="font-size:16px;font-weight:700;color:${colorBanco};">
-                  ${previousBalanceText}
+                  ${GrifoUtils.escapeHtml(previousBalanceText)}
                 </div>
               </div>
             ` : bancoPendente ? `
-              <div title="${previousBalanceText}"
+              <div title="${GrifoUtils.escapeHtml(previousBalanceText)}"
                    style="background:rgba(255,255,255,0.1);
                           border-radius:10px;
                           padding:12px;
@@ -1134,7 +1218,7 @@ class GrifoCheck {
     $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).draggable();
 
     // Debug summary
-    debugLog('\\n--- CALCULATION SUMMARY ---');
+    debugLog('\n--- CALCULATION SUMMARY ---');
     debugLog(`  Jornada Total: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
     debugLog(`  Horas Trabalhadas: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
     debugLog(`  Jornada Acumulada até Hoje: ${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}`);
@@ -1143,7 +1227,7 @@ class GrifoCheck {
     debugLog(`  Banco de Horas Anterior: ${previousBalanceText} (${GrifoUtils.formatMsec(saldoBHoras)})`);
     debugLog(`  Saldo Final: ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}`);
     debugLog(`  Erros: ${cntErro}`);
-    debugLog('=== executaCalculo END ===\\n');
+    debugLog('=== executaCalculo END ===\n');
 
     this.setupEventHandlers();
   }
@@ -1173,7 +1257,7 @@ class GrifoCheck {
           $elem.css('background-color', GRIFO_CONFIG.COLORS.WHITE);
         }
 
-        if (event.keyCode === 13) { // Enter key
+        if (event.key === 'Enter') {
           $(`#${GRIFO_CONFIG.IDS.BTN_RELOAD}`).click();
         }
       });
@@ -1188,7 +1272,7 @@ class GrifoCheck {
    * fills the empty time boxes with the schedule times
    */
   autoFillTeletrabalho() {
-    debugLog('\\n=== Starting autoFillTeletrabalho ===');
+    debugLog('\n=== Starting autoFillTeletrabalho ===');
     
     const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
     if (!tableRows) {
@@ -1213,7 +1297,7 @@ class GrifoCheck {
         const hasTeletrabalho = onmouseover.toLowerCase().includes('teletrabalho');
         
         if (hasTeletrabalho) {
-          debugLog(`\\n  Row ${contador}: ✓ TELETRABALHO FOUND`);
+          debugLog(`\n  Row ${contador}: ✓ TELETRABALHO FOUND`);
           
           // Extract schedule times from column 2 (td:eq(1))
           const scheduleCell = $row.find('td:eq(1)');
@@ -1279,9 +1363,14 @@ class GrifoCheck {
    */
   start() {
     debugLog('\n\n========== GRIFO CHECK START ==========');
-    
-    this.saveCookieInputValues();
-    
+
+    // Must run before saving: on a month change the inputs on screen belong to
+    // the new period, and saving them first would write them under the old key
+    const periodChanged = this.refreshPeriodContext();
+    if (!periodChanged) {
+      this.saveCookieInputValues();
+    }
+
     debugLog('Getting array data from cookies...');
     const arrDados = this.getArrResultCk();
     
