@@ -28,6 +28,17 @@ const GRIFO_CONFIG = {
     SAIDA_IDEAL_MAX_MS: 6 * 3600000
   },
 
+  // Floating panel placement
+  PANEL: {
+    // Where it sits before the user has ever dragged it
+    DEFAULT_LEFT: 'calc(77% - 150px)',
+    DEFAULT_TOP: '60px',
+    // Keep at least this much of the panel on screen, so it stays grabbable
+    // even if the saved position came from a larger window
+    MIN_VISIBLE_X: 120,
+    MIN_VISIBLE_Y: 60
+  },
+
   // Regex patterns
   PATTERNS: {
     TIME_FORMAT: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/,

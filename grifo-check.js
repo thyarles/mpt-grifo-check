@@ -84,6 +84,7 @@ class GrifoCheck {
     this.observer = null;
     this.pollTimer = null;
     this.ENABLED_COOKIE_NAME = 'grifo-check-enabled';
+    this.POSITION_COOKIE_NAME = 'grifo-check-position';
     this.loadEnabledState();
     
     // Always add the toggle, even when disabled
@@ -963,22 +964,9 @@ class GrifoCheck {
     debugLog(`  saldoCurrentCalc: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
 
     // Remove existing container and store position
-    let top = '60px';
-    let left = 'calc(77% - 150px)';
     const existingContainer = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`);
-
-    if (existingContainer.length) {
-      // getBoundingClientRect() is the coordinate space these fixed-position
-      // top/left values are consumed in. Note jQuery's .position() special-cases
-      // position:fixed and returns the same numbers - measured identical on the
-      // live page - so this is NOT a drift fix, despite appearances. The clamp
-      // is the part that earns its keep: it stops a window resize from
-      // stranding the panel off-screen.
-      const rect = existingContainer[0].getBoundingClientRect();
-      top = `${Math.max(0, Math.min(rect.top, window.innerHeight - 60))}px`;
-      left = `${Math.max(0, Math.min(rect.left, window.innerWidth - 120))}px`;
-      existingContainer.remove();
-    }
+    const { left, top } = this.resolvePanelPosition(existingContainer);
+    existingContainer.remove();
 
     const faltaSobra = saldoJornadaMesAt > saldoHorarioMes ? 'Falta' : 'Sobra';
     const temJornadaHoje = this.state.saldoJornadaAcumHj !== 0;
@@ -1086,6 +1074,90 @@ class GrifoCheck {
   }
 
   /**
+   * Decide where the panel should appear, in priority order: where it already
+   * is (a re-render mid-session), then wherever the user last dragged it, then
+   * the default corner.
+   * @param {jQuery} $existing - The current panel, if one is on the page
+   * @returns {{left: string, top: string}} CSS values
+   */
+  resolvePanelPosition($existing) {
+    if ($existing.length) {
+      // getBoundingClientRect() is the coordinate space these fixed-position
+      // values are consumed in. jQuery's .position() special-cases
+      // position:fixed and returns the same numbers - measured identical on
+      // the live page - so this is not a drift fix, despite appearances.
+      const rect = $existing[0].getBoundingClientRect();
+      return this.clampPosition(rect.left, rect.top);
+    }
+
+    const saved = this.loadPanelPosition();
+    if (saved) {
+      debugLog(`Restoring saved panel position: ${saved.left},${saved.top}`);
+      return this.clampPosition(saved.left, saved.top);
+    }
+
+    return {
+      left: GRIFO_CONFIG.PANEL.DEFAULT_LEFT,
+      top: GRIFO_CONFIG.PANEL.DEFAULT_TOP
+    };
+  }
+
+  /**
+   * Keep a grabbable corner of the panel inside the viewport. Matters most for
+   * a position restored from a cookie written on a larger screen.
+   * @param {number} left - Desired left in px
+   * @param {number} top - Desired top in px
+   * @returns {{left: string, top: string}} CSS values
+   */
+  clampPosition(left, top) {
+    const { MIN_VISIBLE_X, MIN_VISIBLE_Y } = GRIFO_CONFIG.PANEL;
+    return {
+      left: `${Math.max(0, Math.min(left, window.innerWidth - MIN_VISIBLE_X))}px`,
+      top: `${Math.max(0, Math.min(top, window.innerHeight - MIN_VISIBLE_Y))}px`
+    };
+  }
+
+  /**
+   * Read the panel position the user last dragged to
+   * @returns {{left: number, top: number}|null} Position, or null if unset or unusable
+   */
+  loadPanelPosition() {
+    try {
+      const raw = Cookies.get(this.POSITION_COOKIE_NAME);
+      if (!raw) return null;
+
+      const saved = JSON.parse(raw);
+      // A hand-edited or truncated cookie must not wedge the panel somewhere
+      // unreachable, so anything non-numeric falls back to the default
+      if (!Number.isFinite(saved?.left) || !Number.isFinite(saved?.top)) {
+        debugLog('Saved panel position is malformed, ignoring it');
+        return null;
+      }
+      return { left: saved.left, top: saved.top };
+    } catch (error) {
+      console.error('Error reading saved panel position:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Remember where the user dropped the panel
+   * @param {number} left - Left offset in px
+   * @param {number} top - Top offset in px
+   */
+  savePanelPosition(left, top) {
+    const position = { left: Math.round(left), top: Math.round(top) };
+    try {
+      Cookies.set(this.POSITION_COOKIE_NAME, JSON.stringify(position), {
+        expires: GRIFO_CONFIG.TIME.COOKIE_EXPIRY_DAYS
+      });
+      debugLog(`Saved panel position: ${position.left},${position.top}`);
+    } catch (error) {
+      console.error('Error saving panel position:', error);
+    }
+  }
+
+  /**
    * Make the panel draggable with pointer events.
    * Replaces jQuery UI's .draggable(), which was the only thing 253KB of
    * jquery-ui was being loaded for.
@@ -1108,6 +1180,8 @@ class GrifoCheck {
     };
 
     const onUp = event => {
+      const rect = el.getBoundingClientRect();
+      this.savePanelPosition(rect.left, rect.top);
       el.releasePointerCapture?.(event.pointerId);
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
