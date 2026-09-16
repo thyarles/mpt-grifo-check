@@ -4,16 +4,46 @@
  * ============================================
  * DEBUG MODE
  * ============================================
- * Set DEBUG to true to enable detailed console logging
- * Set DEBUG to false to disable all debug output
- * 
+ * Two ways to turn logging on:
+ *
+ *   1. Flip DEBUG below and reload the extension.
+ *   2. Without touching the source, run this in the page console and reload:
+ *        localStorage.setItem('grifo-debug', '1')      // '0' to turn it off
+ *
+ * Use the localStorage form from the normal console. Content scripts run in an
+ * isolated world, so grifoDebug() is NOT reachable from the page's default
+ * console context - you would have to switch the console's context dropdown to
+ * this extension first. localStorage is shared with the page, so it always works.
+ *
  * Debug logs will show:
  * - Teletrabalho auto-fill operations
  * - Previous balance retrieval (Chrome compatibility fixes)
  * - Calculation summaries and results
  * - Step-by-step execution flow
  */
-const DEBUG = false;
+let DEBUG = false;
+try {
+  // Only override the value above when a choice has actually been stored,
+  // otherwise editing DEBUG by hand would be silently undone on every load.
+  const storedDebug = localStorage.getItem('grifo-debug');
+  if (storedDebug !== null) DEBUG = storedDebug === '1';
+} catch (error) {
+  // localStorage can throw on restricted origins; stay quiet and keep DEBUG off
+}
+
+/**
+ * Turn debug logging on or off from the console
+ * @param {boolean} on - true to enable logging
+ */
+function grifoDebug(on = true) {
+  DEBUG = on;
+  try {
+    localStorage.setItem('grifo-debug', on ? '1' : '0');
+  } catch (error) {
+    console.warn('Grifo Check: could not persist the debug flag', error);
+  }
+  console.log(`[Grifo] debug ${on ? 'ON' : 'OFF'}`);
+}
 
 /**
  * Debug logging helper
@@ -39,7 +69,6 @@ class GrifoCheck {
   constructor() {
     this.state = {
       saldoJornadaMesAt: 0,
-      saldoCurrent: 0,
       saldoJornadaAcumHj: 0,
       idxHoje: 0,
       totalDias: 0,
@@ -48,11 +77,14 @@ class GrifoCheck {
       idCookiePeriodo: '',
       enabled: true,
       arrJornadasOrigSaved: null,
-      arrHorariosOrigSaved: null
+      arrHorariosOrigSaved: null,
+      periodKey: null
     };
 
     this.observer = null;
+    this.pollTimer = null;
     this.ENABLED_COOKIE_NAME = 'grifo-check-enabled';
+    this.POSITION_COOKIE_NAME = 'grifo-check-position';
     this.loadEnabledState();
     
     // Always add the toggle, even when disabled
@@ -69,9 +101,28 @@ class GrifoCheck {
    * Initialize the extension
    */
   init() {
+    // Idempotent: enable() calls init() again, and without this each toggle-on
+    // would leave behind an extra observer and an extra polling interval
+    this.stopMonitoring();
     this.extractUserInfo();
     this.setupObserver();
     this.startMonitoring();
+  }
+
+  /**
+   * Tear down the observer and the polling interval
+   */
+  stopMonitoring() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+      debugLog('Observer disconnected');
+    }
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+      debugLog('Polling stopped');
+    }
   }
 
   /**
@@ -91,88 +142,29 @@ class GrifoCheck {
         clearInterval(checkHistorico);
         
         const toggleHTML = `
-          <div id="grifo-toggle-historico" 
-               style="display:inline-flex;
-                      align-items:center;
-                      gap:8px;
-                      float:right;
-                      vertical-align:middle;">
-            <span style="font-size:11px;
-                        font-weight:600;
-                        color:#666;">Grifo Check:</span>
-            <label style="position:relative;
-                          display:inline-block;
-                          width:44px;
-                          height:24px;
-                          cursor:pointer;
-                          vertical-align:middle;">
-              <input type="checkbox" 
-                     id="grifo-toggle" 
-                     ${this.state.enabled ? 'checked' : ''}
-                     style="opacity:0;
-                            width:0;
-                            height:0;">
-              <span class="grifo-toggle-slider"
-                    style="position:absolute;
-                           cursor:pointer;
-                           top:0;
-                           left:0;
-                           right:0;
-                           bottom:0;
-                           background-color:#ccc;
-                           transition:0.3s;
-                           border-radius:24px;
-                           box-shadow:0 2px 4px rgba(0,0,0,0.2);">
-                <span class="grifo-toggle-button"
-                      style="position:absolute;
-                             content:'';
-                             height:18px;
-                             width:18px;
-                             left:3px;
-                             bottom:3px;
-                             background-color:white;
-                             transition:0.3s;
-                             border-radius:50%;
-                             box-shadow:0 2px 4px rgba(0,0,0,0.3);"></span>
+          <div id="grifo-toggle-historico" class="gc-toggle-wrap">
+            <span class="gc-toggle-caption">Grifo Check:</span>
+            <label class="gc-toggle">
+              <input type="checkbox" id="grifo-toggle" class="gc-toggle__input"
+                     ${this.state.enabled ? 'checked' : ''}>
+              <span class="gc-toggle__slider">
+                <span class="gc-toggle__knob"></span>
               </span>
             </label>
-            <span id="grifo-toggle-status" 
-                  style="font-size:11px;
-                        font-weight:600;
-                        color:${this.state.enabled ? '#51CF66' : '#999'};">
-            </span>
           </div>
         `;
-        
+
         $historico.append(toggleHTML);
-        
-        // Add CSS for toggle animation
-        const toggleStyles = `
-          <style id="grifo-toggle-styles">
-            #grifo-toggle:checked + .grifo-toggle-slider {
-              background-color: #51CF66 !important;
-            }
-            #grifo-toggle:checked + .grifo-toggle-slider > .grifo-toggle-button {
-              transform: translateX(20px);
-            }
-            #grifo-toggle-historico:hover {
-              opacity: 0.9;
-            }
-          </style>
-        `;
-        if ($('#grifo-toggle-styles').length === 0) {
-          $('head').append(toggleStyles);
-        }
-        
+
         // Setup toggle event handler
         this.setupToggleHandler();
         
         debugLog('Toggle added to historico');
       }
-    }, 100);
-    
-    // Stop checking after 10 seconds
-    setTimeout(() => clearInterval(checkHistorico), 10000);
+    }, GRIFO_CONFIG.TIME.TOGGLE_POLL_INTERVAL);
+
+    // Give up waiting for the page to render the toolbar
+    setTimeout(() => clearInterval(checkHistorico), GRIFO_CONFIG.TIME.TOGGLE_POLL_TIMEOUT);
   }
 
   /**
@@ -182,16 +174,13 @@ class GrifoCheck {
     $('#grifo-toggle').off('change').on('change', (e) => {
       const isChecked = $(e.target).is(':checked');
       
-      if (!isChecked && this.state.enabled) {
-        // User is disabling the extension (no confirmation)
-        this.disable();
-        $('#grifo-toggle-status').css('color', '#999');
-        this.clickConsultarButton();
-      } else if (isChecked && !this.state.enabled) {
-        // User is enabling the extension (no confirmation)
-        $('#grifo-toggle-status').css('color', '#51CF66');
+      if (isChecked === this.state.enabled) return;
+
+      // enable()/disable() handle the reload themselves
+      if (isChecked) {
         this.enable();
-        this.clickConsultarButton();
+      } else {
+        this.disable();
       }
     });
   }
@@ -202,14 +191,20 @@ class GrifoCheck {
   clickConsultarButton() {
     // Find the Consultar button by its attributes
     const $consultarBtn = $('button[name="botao_operacao"][value="consultar"]');
-    if ($consultarBtn.length > 0) {
-      debugLog('Clicking Consultar button...');
-      setTimeout(() => {
-        $consultarBtn.click();
-      }, 200);
-    } else {
+    if ($consultarBtn.length === 0) {
       debugLog('Consultar button not found');
+      return false;
     }
+
+    debugLog('Clicking Consultar button...');
+    setTimeout(() => {
+      // Native click rather than jQuery's .click(). Measured against the live
+      // page: both produce exactly one navigation, so this is NOT a fix for
+      // double submission - jQuery guards its own re-dispatch. Kept only
+      // because it is the more direct call.
+      $consultarBtn[0].click();
+    }, 200);
+    return true;
   }
 
   /**
@@ -243,7 +238,13 @@ class GrifoCheck {
     debugLog('Enabling Grifo Check...');
     this.state.enabled = true;
     this.saveEnabledState();
-    this.init();
+
+    // Same reasoning as disable(): the reload re-runs the whole extension from
+    // a clean page, so initialising here as well would just paint a panel that
+    // is discarded a moment later.
+    if (!this.clickConsultarButton()) {
+      this.init();
+    }
   }
 
   /**
@@ -253,22 +254,27 @@ class GrifoCheck {
     debugLog('Disabling Grifo Check...');
     this.state.enabled = false;
     this.saveEnabledState();
-    
-    // Stop observer
-    if (this.observer) {
-      this.observer.disconnect();
-      this.observer = null;
-      debugLog('Observer disconnected');
+    this.stopMonitoring();
+
+    // A reload is the only way to get the original punch cells back, since
+    // getDadosMesOrig replaces them with our own containers. Only tear down by
+    // hand when we cannot reload - doing both would render a frame that the
+    // reload throws away 200ms later, which is the visible blink.
+    if (!this.clickConsultarButton()) {
+      this.removeInjectedUi();
     }
-    
-    // Remove all UI elements
+  }
+
+  /**
+   * Remove every element the extension injected into the page
+   */
+  removeInjectedUi() {
     $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_SALDO}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.CONTAINER_JORNADA}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.MINHA_JORNADA}`).remove();
     $(`.${GRIFO_CONFIG.CLASSES.MEU_SALDO}`).remove();
-    
     debugLog('All UI elements removed');
   }
 
@@ -317,6 +323,30 @@ class GrifoCheck {
   }
 
   /**
+   * Detect a change of displayed period and drop everything scoped to the old one.
+   * extractUserInfo only runs from init(), so without this the cookie key and the
+   * day count stay frozen at first load and edits land under the previous month.
+   * @returns {boolean} True if the period changed
+   */
+  refreshPeriodContext() {
+    const dateInput = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.DATE_INPUT);
+    const dateValue = dateInput ? dateInput.val() : '';
+    const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
+    const periodKey = `${dateValue}|${tableRows ? tableRows.length : 0}`;
+
+    if (periodKey === this.state.periodKey) return false;
+
+    debugLog(`Period changed: "${this.state.periodKey}" -> "${periodKey}" (invalidating caches)`);
+    this.state.periodKey = periodKey;
+    this.state.arrJornadasOrigSaved = null;
+    this.state.arrHorariosOrigSaved = null;
+    this.state.idxHoje = 0;
+    this.extractUserInfo();
+
+    return true;
+  }
+
+  /**
    * Setup MutationObserver to watch for DOM changes
    */
   setupObserver() {
@@ -344,40 +374,21 @@ class GrifoCheck {
    * Check if conditions are met to start calculations
    */
   checkAndStart() {
+    if (!this.state.enabled) return;
+
     const resultSection = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.RESULT_SECTION);
     const containerExists = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).length > 0;
 
     if (!resultSection || containerExists) return;
 
-    // Try to get user name from page to verify it matches
-    let pageUserName = '';
-    let $userElement = null;
-    
-    // Method 1: Try input field (old method)
-    $userElement = $(GRIFO_CONFIG.SELECTORS.EDIT_PESSOA);
-    if ($userElement.length > 0) {
-      pageUserName = $userElement.val().trim().toUpperCase();
-      debugLog(`checkAndStart: Found user via input[name=_pessoa]: "${pageUserName}"`);
-    }
-    
-    // Method 2: Try div[4] path provided by user
-    if (!pageUserName) {
-      $userElement = $('body > div:eq(3) > div:eq(0) > table > tbody > tr:eq(1) > td > font > b');
-      if ($userElement.length > 0) {
-        pageUserName = $userElement.text().trim().toUpperCase();
-        debugLog(`checkAndStart: Found user via div[4] path: "${pageUserName}"`);
-      }
-    }
-    
-    // Method 3: Try without tbody
-    if (!pageUserName) {
-      $userElement = $('body > div:eq(3) > div:eq(0) > table > tr:eq(1) > td > font > b');
-      if ($userElement.length > 0) {
-        pageUserName = $userElement.text().trim().toUpperCase();
-        debugLog(`checkAndStart: Found user via div[4] path (no tbody): "${pageUserName}"`);
-      }
-    }
-    
+    // Three shapes the name has appeared in across Grifo versions
+    const pageUserName = GrifoUtils.firstMatch([
+      () => $(GRIFO_CONFIG.SELECTORS.EDIT_PESSOA).val()?.trim().toUpperCase() || '',
+      () => GrifoUtils.safeText($(GRIFO_CONFIG.SELECTORS.HEADER_NAME_ALT)).toUpperCase(),
+      () => GrifoUtils.safeText($(GRIFO_CONFIG.SELECTORS.HEADER_NAME_ALT_NO_TBODY)).toUpperCase()
+    ]);
+    debugLog(`checkAndStart: pageUserName="${pageUserName}"`);
+
     // If no user element found, proceed anyway (some pages might not have it)
     const shouldProceed = !pageUserName || (pageUserName === this.state.strNome.trim());
     
@@ -395,7 +406,9 @@ class GrifoCheck {
     this.checkAndStart();
 
     // Fallback polling for edge cases
-    setInterval(() => this.checkAndStart(), GRIFO_CONFIG.TIME.CHECK_INTERVAL);
+    if (this.pollTimer === null) {
+      this.pollTimer = setInterval(() => this.checkAndStart(), GRIFO_CONFIG.TIME.CHECK_INTERVAL);
+    }
   }
 
   /**
@@ -462,22 +475,42 @@ class GrifoCheck {
    * @param {jQuery} rowElement - Table row element
    * @returns {string} Work schedule time (e.g., "08:00")
    */
+  /**
+   * Clone a row cell, drop its images, and split it into visual lines.
+   * Empty lines are preserved on purpose - callers rely on the count to decide
+   * how many input boxes a day renders.
+   * @param {jQuery} rowElement - The table row
+   * @param {number} cellIndex - Zero-based column index
+   * @returns {string[]} Trimmed lines, with &nbsp; normalized to spaces
+   */
+  splitCellLines(rowElement, cellIndex) {
+    const cellContent = rowElement.find(`td:eq(${cellIndex})`);
+    if (!GrifoUtils.safeText(cellContent)) return [];
+
+    const content = cellContent.clone();
+    content.find('img').remove();
+
+    // Trim BEFORE converting <br>, not after. The original trimmed a string in
+    // which the separators were '#', so edge separators survived the trim and a
+    // leading/trailing <br> produced an empty line - which is one extra pair of
+    // input boxes for that day. Trimming after the conversion would eat those
+    // and silently change how many boxes render.
+    return content.html()
+      .trim()
+      .replace(/<br\s*\/?>/gi, '\n')
+      .split('\n')
+      .map(line => line.replace(/&nbsp;/gi, ' ').trim());
+  }
+
   getJornadaDiaOrig(rowElement) {
     let jornadaDia = '00:00';
 
     try {
-      const cellContent = rowElement.find('td:eq(1)');
-      if (!GrifoUtils.safeText(cellContent)) return jornadaDia;
-
-      const content = cellContent.clone();
-      content.find('img').remove();
-
-      const htmlContent = content.html().replaceAll('<br>', '#');
-      const scheduleParts = htmlContent.trim().split('#');
+      const scheduleParts = this.splitCellLines(rowElement, 1);
       let totalTime = 0;
 
       scheduleParts.forEach(part => {
-        const times = part.split(' - ').map(t => t.trim().replaceAll('&nbsp;', ''));
+        const times = part.split(' - ').map(t => t.trim());
 
         if (times.length >= 2 &&
           GrifoUtils.isValidTime(times[0]) &&
@@ -504,14 +537,7 @@ class GrifoCheck {
     const arrDiaHorarios = [];
 
     try {
-      const cellContent = rowElement.find('td:eq(2)');
-      if (!GrifoUtils.safeText(cellContent)) return arrDiaHorarios;
-
-      const content = cellContent.clone();
-      content.find('img').remove();
-
-      const htmlContent = content.html().replaceAll('<br>', '#');
-      const timeParts = htmlContent.trim().split('#');
+      const timeParts = this.splitCellLines(rowElement, 2);
 
       timeParts.forEach(part => {
         const times = part.split(' - ').map(t => t.trim());
@@ -605,8 +631,10 @@ class GrifoCheck {
           arrHorariosResult[dia][batida] = [b1, b2];
         }
       } else {
+        // Deliberately not writing back into arrHorariosOrig here: it is the cached
+        // originals array, and clobbering it would kill the "modified" highlight.
+        // setInputHorarios already reads it with optional chaining.
         arrHorariosResult[dia][0] = ['', ''];
-        arrHorariosOrig[dia][0] = ['', ''];
       }
     }
 
@@ -625,14 +653,23 @@ class GrifoCheck {
   getJornadasHorariosCookie() {
     const arrCookie = GrifoUtils.cookies.get(this.state.idCookiePeriodo);
 
-    if (arrCookie.length > 0) {
-      return {
-        arr_jornadas_ck: arrCookie[0],
-        arr_horarios_ck: arrCookie[1]
-      };
-    }
+    if (!Array.isArray(arrCookie) || arrCookie.length === 0) return {};
 
-    return {};
+    // Normalize on read. These values only ever originate from mask('00:00')
+    // inputs, so anything that is not "HH:mm" is corruption: reject it here
+    // rather than letting it reach the markup or the arithmetic.
+    const jornadas = Array.isArray(arrCookie[0]) ? arrCookie[0] : [];
+    const horarios = Array.isArray(arrCookie[1]) ? arrCookie[1] : [];
+
+    return {
+      arr_jornadas_ck: jornadas.map(jornada => GrifoUtils.sanitizeTime(jornada)),
+      arr_horarios_ck: horarios.map(dia =>
+        (Array.isArray(dia) ? dia : []).map(batida => [
+          GrifoUtils.sanitizeTime(batida?.[0]),
+          GrifoUtils.sanitizeTime(batida?.[1])
+        ])
+      )
+    };
   }
 
   /**
@@ -694,8 +731,8 @@ class GrifoCheck {
                style="background-color:${colorChange}" 
                class="${GRIFO_CONFIG.CLASSES.MINHA_JORNADA} dia${contadorDia}" 
                id="minhaJornada${contadorDia}" 
-               value="${jDia || ''}" 
-               val-orig="${jDiaOrig || ''}">
+               value="${GrifoUtils.escapeHtml(jDia)}" 
+               val-orig="${GrifoUtils.escapeHtml(jDiaOrig)}">
       `;
 
       $(`#conteinerjornada${contadorDia}`).append(html);
@@ -705,7 +742,7 @@ class GrifoCheck {
     this.state.saldoJornadaMesAt = saldoJornadaMesAt;
     this.state.saldoJornadaAcumHj = saldoJornadaAcumHj;
 
-    return { saldoJornadaMesAt, saldoCurrent: this.state.saldoCurrent };
+    return { saldoJornadaMesAt };
   }
 
   /**
@@ -720,7 +757,7 @@ class GrifoCheck {
     let saldoHorarioMes = 0;
     let contadorErro = 0;
     let contadorHoje = 0;
-    const MAX_DAILY_HOURS_MS = 10 * 60 * 60 * 1000; // 10 hours in milliseconds
+    const MAX_DAILY_HOURS_MS = GRIFO_CONFIG.RULES.MAX_DAILY_HOURS_MS;
 
     $(`.${GRIFO_CONFIG.CLASSES.MEU_PONTO}, .${GRIFO_CONFIG.CLASSES.MEU_SALDO}`).remove();
 
@@ -743,26 +780,19 @@ class GrifoCheck {
         const colorB1 = b1 !== b1Orig ? GRIFO_CONFIG.COLORS.HIGHLIGHT : GRIFO_CONFIG.COLORS.WHITE;
         const colorB2 = b2 !== b2Orig ? GRIFO_CONFIG.COLORS.HIGHLIGHT : GRIFO_CONFIG.COLORS.WHITE;
 
-        html += `<input size="5" 
-                        style="background-color:${colorB1};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;margin-right:4px" 
-                        class="${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}" 
-                        id="meuPonto${contadorDia}-${contadorBatida}-1" 
-                        value="${b1 || ''}" 
-                        val-orig="${b1Orig || ''}">`;
-        html += `<input size="5" 
-                        style="background-color:${colorB2};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;margin-right:4px" 
-                        class="${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}" 
-                        id="meuPonto${contadorDia}-${contadorBatida}-2" 
-                        value="${b2 || ''}" 
-                        val-orig="${b2Orig || ''}">`;
-
-        let saldoBatida = '';
-        let cssErro = '';
-        let strAlert = '';
+        html += `<input size="5" class="gc-input ${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}"
+                        style="background-color:${colorB1}"
+                        id="meuPonto${contadorDia}-${contadorBatida}-1"
+                        value="${GrifoUtils.escapeHtml(b1)}"
+                        val-orig="${GrifoUtils.escapeHtml(b1Orig)}">`;
+        html += `<input size="5" class="gc-input ${GRIFO_CONFIG.CLASSES.MEU_PONTO} dia${contadorDia}"
+                        style="background-color:${colorB2}"
+                        id="meuPonto${contadorDia}-${contadorBatida}-2"
+                        value="${GrifoUtils.escapeHtml(b2)}"
+                        val-orig="${GrifoUtils.escapeHtml(b2Orig)}">`;
 
         if (GrifoUtils.isValidTime(b1) && GrifoUtils.isValidTime(b2)) {
           const batidaDiff = GrifoUtils.diffDate(b1, b2);
-          saldoBatida = GrifoUtils.formatMsec(batidaDiff);
           saldoHorarioDiaRaw += batidaDiff;
           saldoHorarioDia += batidaDiff;
 
@@ -777,36 +807,14 @@ class GrifoCheck {
           }
 
           saldoHorarioMes += isCompleteForToday ? GrifoUtils.diffDate(b1, b2) : 0;
-        } else {
-          const saldoRest = jornadaDia - (saldoHorarioDia || 0);
-          const horaDebito = GrifoUtils.formatMsec(Math.abs(saldoRest));
-
-          cssErro = contadorHoje > 0 ?
-            GRIFO_CONFIG.COLORS.DISABLED :
-            (saldoRest > 0 ? GRIFO_CONFIG.COLORS.ERROR : GRIFO_CONFIG.COLORS.LIGHT_ERROR);
-
-          if (GrifoUtils.isValidTime(b1) || GrifoUtils.isValidTime(b2)) {
-            const saidaSugerida = GrifoUtils.formatDate(
-              GrifoUtils.sumDateMsec(b1, saldoRest),
-              'HH:mm'
-            );
-            const sinal = saldoRest <= 0 ? '+' : '-';
-            strAlert = `<span class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-                              style="color:${GRIFO_CONFIG.COLORS.ERROR}">
-                          (${sinal}${horaDebito}) Saída ${saidaSugerida}
-                        </span>`;
-            if (contadorHoje < 1) contadorErro++;
-          }
+        } else if (GrifoUtils.isValidTime(b1) || GrifoUtils.isValidTime(b2)) {
+          // Exactly one of the pair is filled: the day needs correcting, unless
+          // it is today and still in progress. The per-batida saldo box that
+          // used to render here was disabled long ago; everything that fed it
+          // has been removed (see git history to restore it).
+          if (contadorHoje < 1) contadorErro++;
         }
 
-        // html += `<input size="5" 
-        //                 class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-        //                 disabled 
-        //                 style="${cssErro ? 'background-color:' + cssErro + ';' : ''}border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center;font-weight:600" 
-        //                 id="meuPonto${contadorDia}-${contadorBatida}-saldo" 
-        //                 value="${saldoBatida}">
-        //          ${strAlert}
-        //          <spam class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}">`;
 
         contadorBatida++;
       });
@@ -818,73 +826,130 @@ class GrifoCheck {
         const extraHours = GrifoUtils.formatMsec(extraMs);
         saldoHorarioDia = MAX_DAILY_HOURS_MS;
         saldoHorarioMes -= extraMs;
-        cappedWarning = `<br><span class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" style="color:${GRIFO_CONFIG.COLORS.ERROR};font-size:11px">⚠ Limitado a 10h (${extraHours} ignorado)</span>`;
+        const capLabel = `${MAX_DAILY_HOURS_MS / 3600000}h`;
+        cappedWarning = `<br><span class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" style="color:${GRIFO_CONFIG.COLORS.ERROR};font-size:11px">⚠ Limitado a ${capLabel} (${extraHours} ignorado)</span>`;
         debugLog(`  Day ${contadorDia}: Capped at 10h, ignored ${extraHours}`);
       }
 
       const cssSaldo = (jornadaDia > saldoHorarioDia && contadorHoje <= 0) ?
         `color:${GRIFO_CONFIG.COLORS.ERROR}` : '';
 
-      html += `<input size="4" 
-                      class="${GRIFO_CONFIG.CLASSES.MEU_SALDO}" 
-                      style="font-weight:bold;${cssSaldo};border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-family:monospace;font-size:13px;text-align:center" 
-                      disabled 
-                      id="meuPonto${contadorDia}-${contadorBatida}-saldo_horario_dia" 
+      html += `<input size="4" disabled
+                      class="gc-input gc-input--total ${GRIFO_CONFIG.CLASSES.MEU_SALDO}"
+                      style="${cssSaldo}"
+                      id="meuPonto${contadorDia}-${contadorBatida}-saldo_horario_dia"
                       value="${GrifoUtils.formatMsec(saldoHorarioDia)}">${cappedWarning}`;
 
       $(`#conteinerdia${contadorDia}`).append(html);
       contadorDia++;
     });
 
-    return { saldoHorarioMes, cnt_erro: contadorErro, cnt_hoje: contadorHoje };
+    return { saldoHorarioMes, cntErro: contadorErro, cntHoje: contadorHoje };
+  }
+
+  /**
+   * Pick the colour class for a signed duration.
+   * Note the sign: callers pass the value they DISPLAY, so "Falta" passes
+   * (worked - scheduled), which is the negation of the test it used to inline.
+   * @param {number} ms - Signed milliseconds
+   * @returns {string} CSS class
+   */
+  tone(ms) {
+    return ms < 0 ? 'gc-neg' : 'gc-pos';
+  }
+
+  /**
+   * One half-width tile in the two-column summary row
+   * @param {string} label - Uppercase caption
+   * @param {string} value - Pre-escaped HTML for the value
+   * @param {{tone?: string, note?: string, title?: string}} [opts]
+   * @returns {string} HTML
+   */
+  renderTile(label, value, opts = {}) {
+    const { tone = '', note = '', title = '' } = opts;
+    return `
+      <div class="gc-card gc-card--tile"${title ? ` title="${GrifoUtils.escapeHtml(title)}"` : ''}>
+        <div class="gc-label gc-label--tile">${label}</div>
+        <div class="gc-value gc-value--tile ${tone}">${value}</div>
+        ${note ? `<div class="gc-note">${note}</div>` : ''}
+      </div>`;
+  }
+
+  /**
+   * The suggested end-of-day time, or the reason there isn't one
+   * @param {number} saldoCurrentCalc - Current balance in ms
+   * @param {string} ultimaEntrada - Today's last open check-in "HH:mm"
+   * @param {string} jornadaDoDia - Today's scheduled hours "HH:mm"
+   * @param {number} horasTrabalhadasHojeMs - Closed intervals worked today
+   * @returns {string} HTML
+   */
+  renderSaidaIdeal(saldoCurrentCalc, ultimaEntrada, jornadaDoDia, horasTrabalhadasHojeMs) {
+    const { SAIDA_IDEAL_MIN_MS, SAIDA_IDEAL_MAX_MS } = GRIFO_CONFIG.RULES;
+
+    const podeSugerir = ultimaEntrada &&
+      GrifoUtils.isValidTime(ultimaEntrada) &&
+      saldoCurrentCalc > SAIDA_IDEAL_MIN_MS &&
+      saldoCurrentCalc <= SAIDA_IDEAL_MAX_MS;
+
+    if (!podeSugerir) {
+      return '<div class="gc-hint">Preencha <b>Teletrabalho</b> na nota dos dias remotos.</div>';
+    }
+
+    const jornadaMs = GrifoUtils.diffDate('00:00', jornadaDoDia || '00:00');
+    const remainingMs = jornadaMs - horasTrabalhadasHojeMs - saldoCurrentCalc;
+
+    if (remainingMs <= 0) {
+      return '<div class="gc-hint">Você está trabalhando demais, não acha?</div>';
+    }
+
+    const horarioSugerido = GrifoUtils.formatDate(
+      GrifoUtils.sumDateMsec(ultimaEntrada, remainingMs),
+      'HH:mm'
+    );
+    // The original wrapped this whole line in <b>, so the label is bold too
+    return `<div class="gc-hint"><b>Saída ideal: <strong>${horarioSugerido}</strong>.</b></div>`;
+  }
+
+  /**
+   * Find a value cell by the text of the label cell next to it
+   * @param {string} rowSelector - Selector matching candidate rows
+   * @param {string} label - Substring to look for in the first cell
+   * @returns {string} The second cell's text, or ''
+   */
+  findRowValueByLabel(rowSelector, label) {
+    let value = '';
+    $(rowSelector).each((index, row) => {
+      const $row = $(row);
+      if ($row.find('td:eq(0)').text().trim().includes(label)) {
+        value = $row.find('td:eq(1)').text().trim();
+        return false; // break
+      }
+    });
+    return value;
   }
 
   /**
    * Execute all calculations and display results
    * @param {number} saldoJornadaMesAt - Total work schedule for month
-   * @param {number} saldoCurrent - Current balance
    * @param {number} saldoHorarioMes - Total worked hours for month
    * @param {number} cntErro - Error count
-   * @param {number} cntHoje - Today counter
    * @param {string} ultimaEntrada - Last open check-in time for today (e.g. "08:00")
    * @param {string} jornadaDoDia - Today's scheduled work hours (e.g. "07:00")
    * @param {number} horasTrabalhadasHojeMs - Milliseconds already worked today in closed intervals (before ultimaEntrada)
    */
-  executaCalculo(saldoJornadaMesAt, saldoCurrent, saldoHorarioMes, cntErro, cntHoje, ultimaEntrada = '', jornadaDoDia = '00:00', horasTrabalhadasHojeMs = 0) {
+  executaCalculo(saldoJornadaMesAt, saldoHorarioMes, cntErro, ultimaEntrada = '', jornadaDoDia = '00:00', horasTrabalhadasHojeMs = 0) {
     debugLog('\n=== executaCalculo START ===');
     debugLog(`  saldoJornadaMesAt: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
     debugLog(`  saldoHorarioMes: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
     debugLog(`  saldoJornadaAcumHj: ${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}`);
     
-    // Try multiple methods to get previous balance
-    let previousBalanceText = '';
-    let $balanceElement = null;
-    
-    // Method 1: Original selector
-    $balanceElement = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE);
-    previousBalanceText = GrifoUtils.safeText($balanceElement);
-    debugLog(`  Method 1 (original selector): "${previousBalanceText}"`);
-    
-    // Method 2: Without tbody (Chrome compatibility)
-    if (!previousBalanceText) {
-      $balanceElement = $('#divSecaoSaldoMesAnterior > fieldset > table > tr:eq(0) > td:eq(1)');
-      previousBalanceText = GrifoUtils.safeText($balanceElement);
-      debugLog(`  Method 2 (no tbody): "${previousBalanceText}"`);
-    }
-    
-    // Method 3: Find by text content
-    if (!previousBalanceText) {
-      $('#divSecaoSaldoMesAnterior table tr').each((index, row) => {
-        const $row = $(row);
-        const firstCell = $row.find('td:eq(0)').text().trim();
-        if (firstCell.includes('Banco de horas anterior')) {
-          previousBalanceText = $row.find('td:eq(1)').text().trim();
-          debugLog(`  Method 3 (find by text): "${previousBalanceText}"`);
-          return false; // break
-        }
-      });
-    }
-    
+    // The balance cell has moved between Grifo versions; try each known shape
+    const previousBalanceText = GrifoUtils.firstMatch([
+      GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE,
+      GRIFO_CONFIG.SELECTORS.PREVIOUS_BALANCE_NO_TBODY,
+      () => this.findRowValueByLabel('#divSecaoSaldoMesAnterior table tr', 'Banco de horas anterior')
+    ]);
+
     debugLog(`  Final previousBalanceText: "${previousBalanceText}"`);
     const saldoBHoras = GrifoUtils.diffHoraMsec(previousBalanceText);
     debugLog(`  saldoBHoras (in msec): ${saldoBHoras} (${GrifoUtils.formatMsec(saldoBHoras)})`);
@@ -899,229 +964,76 @@ class GrifoCheck {
     debugLog(`  saldoCurrentCalc: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
 
     // Remove existing container and store position
-    let top = '60px';
-    let left = 'calc(77% - 150px)';
     const existingContainer = $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`);
-
-    if (existingContainer.length) {
-      const position = existingContainer.position();
-      top = `${position.top}px`;
-      left = `${position.left}px`;
-      existingContainer.remove();
-    }
+    const { left, top } = this.resolvePanelPosition(existingContainer);
+    existingContainer.remove();
 
     const faltaSobra = saldoJornadaMesAt > saldoHorarioMes ? 'Falta' : 'Sobra';
-    const colorDiff = saldoJornadaMesAt - saldoHorarioMes > 0 ?
-      '#FF6B6B' :  // Bright red for negative
-      '#51CF66';   // Bright green for positive
-
-    const colorCurrent = saldoCurrentCalc < 0 ?
-      '#FF6B6B' :  // Bright red for negative
-      '#51CF66';   // Bright green for positive
-
-    const colorFinal = saldoHorarioMes - saldoJornadaMesAt + saldoBHoras < 0 ?
-      '#FF6B6B' :  // Bright red for negative
-      '#51CF66';   // Bright green for positive
-
-    const colorBanco = saldoBHoras < 0 ?
-      '#FF6B6B' :  // Bright red for negative
-      '#51CF66';   // Bright green for positive
+    const temJornadaHoje = this.state.saldoJornadaAcumHj !== 0;
 
     const containerHTML = `
-      <div id="${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}" 
-        style="position:fixed;
-               z-index:99999;
-               left:${left};
-               top:${top};
-               cursor:move;
-               width:340px;
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-               border-radius:16px;
-               box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.1);
-               padding:0;
-               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-               color:#fff;
-               overflow:hidden;">
-        
-        <!-- Header -->
-        <div style="background:rgba(0,0,0,0.15);
-                    padding:20px;
-                    border-bottom:1px solid rgba(255,255,255,0.1);
-                    display:flex;
-                    align-items:center;
-                    justify-content:space-between;
-                    gap:20px;">
-          <img style="height:36px;filter:brightness(0) invert(1);" src="${GRIFO_CONFIG.LOGO_SVG}">
-          <div style="text-align:right;flex:1;">
-            <div style="font-size:20px;font-weight:700;letter-spacing:-0.5px;">Grifo Check</div>
-            <div style="font-size:11px;opacity:0.8;font-weight:400;margin-top:2px;">Controle de Jornada</div>
+      <div id="${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}" class="gc-panel" style="left:${left};top:${top};">
+
+        <div class="gc-header">
+          <img class="gc-header__logo" src="${GRIFO_CONFIG.LOGO_SVG}">
+          <div class="gc-header__text">
+            <div class="gc-header__title">Grifo Check</div>
+            <div class="gc-header__subtitle">Controle de Jornada</div>
           </div>
         </div>
-        
-        <!-- Main Content -->
-        <div style="padding:20px;">
-          
-          <!-- Jornada Info -->
-          <div style="background:rgba(255,255,255,0.1);
-                      border-radius:10px;
-                      padding:12px 16px;
-                      margin-bottom:16px;
-                      backdrop-filter:blur(10px);">
-            <div style="font-size:11px;opacity:0.8;font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-              Jornada Total
-            </div>
-            <div style="font-size:24px;font-weight:700;">${GrifoUtils.formatMsec(saldoJornadaMesAt)}</div>
+
+        <div class="gc-body">
+
+          <div class="gc-card">
+            <div class="gc-label">Jornada Total</div>
+            <div class="gc-value">${GrifoUtils.formatMsec(saldoJornadaMesAt)}</div>
           </div>
-          
-          <!-- Current Status -->
-          <div style="background:rgba(255,255,255,0.1);
-                      border-radius:10px;
-                      padding:14px 16px;
-                      margin-bottom:16px;
-                      backdrop-filter:blur(10px);
-                      line-height:1.6;">
-            <div style="font-size:13px;font-weight:400;opacity:0.95;">
-              Trabalhou  
-              <strong style="font-size:15px;color:#FFD93D;">${GrifoUtils.formatMsec(saldoHorarioMes)}</strong>
-              ${this.state.saldoJornadaAcumHj !== 0 ? `
-                  de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>.
-              ` : ''}
+
+          <div class="gc-card gc-card--status">
+            <div class="gc-status-text">
+              Trabalhou
+              <strong class="gc-worked">${GrifoUtils.formatMsec(saldoHorarioMes)}</strong>
+              ${temJornadaHoje ? `de <strong>${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}</strong>.` : ''}
             </div>
-            ${this.state.saldoJornadaAcumHj !== 0 ? (() => {
-              const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
-              const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
-              let saidaIdealHTML = '';
-              if (ultimaEntrada && GrifoUtils.isValidTime(ultimaEntrada) && saldoCurrentCalc > -THREE_HOURS_MS && saldoCurrentCalc <= SIX_HOURS_MS) {
-                const jornadaMs = GrifoUtils.diffDate('00:00', jornadaDoDia || '00:00');
-                const remainingMs = jornadaMs - horasTrabalhadasHojeMs - saldoCurrentCalc;
-                if (remainingMs > 0) {
-                  const horarioSugerido = GrifoUtils.formatDate(
-                    GrifoUtils.sumDateMsec(ultimaEntrada, remainingMs),
-                    'HH:mm'
-                  );
-                  saidaIdealHTML = `<b><div style="font-size:12px;opacity:0.85;margin-top:6px;">Saída ideal: <strong>${horarioSugerido}</strong>.</div></b>`;
-                } else {
-                  saidaIdealHTML = '<div style="font-size:12px;opacity:0.85;margin-top:6px;">Você está trabalhando demais, não acha?</div>';
-                }
-              } else { 
-                saidaIdealHTML = '<div style="font-size:12px;opacity:0.85;margin-top:6px;">Preencha <b>Teletrabalho</b> na nota dos dias remotos.</div>' 
-              }
-              return `
-              <div style="margin-top:12px;
-                          padding-top:12px;
-                          border-top:1px solid rgba(255,255,255,0.15);">
-                <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">SALDO CORRENTE</div>
-                <div style="font-size:20px;font-weight:700;color:${saldoCurrentCalc < 0 ? '#FF6B6B' : '#51CF66'};">
+            ${temJornadaHoje ? `
+              <div class="gc-divider">
+                <div class="gc-label gc-label--plain">SALDO CORRENTE</div>
+                <div class="gc-value gc-value--current ${this.tone(saldoCurrentCalc)}">
                   ${saldoCurrentCalc < 0 ? '' : '+'}${GrifoUtils.formatMsec(saldoCurrentCalc)}
                 </div>
-                ${saidaIdealHTML}
-              </div>
-              `;
-            })() : ''}
-          </div>
-          
-          <!-- Balance Summary -->
-          <div style="display:grid;
-                      grid-template-columns:1fr 1fr;
-                      gap:10px;
-                      margin-bottom:16px;">
-            
-            <div style="background:rgba(255,255,255,0.1);
-                        border-radius:10px;
-                        padding:12px;
-                        backdrop-filter:blur(10px);
-                        text-align:center;">
-              <div style="font-size:10px;opacity:0.8;margin-bottom:4px;text-transform:uppercase;">
-                ${faltaSobra}
-              </div>
-              <div style="font-size:16px;font-weight:700;color:${colorDiff};">
-                ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt)}
-              </div>
-              <div style="font-size:9px;opacity:0.7;margin-top:2px;">
-                ${this.state.totalDias - this.state.idxHoje} dia(s)
-              </div>
-            </div>
-            
-            ${saldoBHoras ? `
-              <div style="background:rgba(255,255,255,0.1);
-                          border-radius:10px;
-                          padding:12px;
-                          backdrop-filter:blur(10px);
-                          text-align:center;">
-                <div style="font-size:10px;opacity:0.8;margin-bottom:4px;text-transform:uppercase;">
-                  Banco
-                </div>
-                <div style="font-size:16px;font-weight:700;color:${colorBanco};">
-                  ${previousBalanceText}
-                </div>
-              </div>
-            ` : bancoPendente ? `
-              <div title="${previousBalanceText}"
-                   style="background:rgba(255,255,255,0.1);
-                          border-radius:10px;
-                          padding:12px;
-                          backdrop-filter:blur(10px);
-                          text-align:center;">
-                <div style="font-size:10px;opacity:0.8;margin-bottom:4px;text-transform:uppercase;">
-                  Banco
-                </div>
-                <div style="font-size:16px;font-weight:700;color:#FFD93D;">
-                  &mdash;&nbsp;:&nbsp;&mdash;
-                </div>
-                <div style="font-size:9px;opacity:0.7;margin-top:2px;">
-                  freq. não fechada
-                </div>
+                ${this.renderSaidaIdeal(saldoCurrentCalc, ultimaEntrada, jornadaDoDia, horasTrabalhadasHojeMs)}
               </div>
             ` : ''}
           </div>
-          
+
+          <div class="gc-grid">
+            ${this.renderTile(faltaSobra, GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt), {
+              tone: this.tone(saldoHorarioMes - saldoJornadaMesAt),
+              note: `${this.state.totalDias - this.state.idxHoje} dia(s)`
+            })}
+            ${saldoBHoras
+              ? this.renderTile('Banco', GrifoUtils.escapeHtml(previousBalanceText), { tone: this.tone(saldoBHoras) })
+              : bancoPendente
+                ? this.renderTile('Banco', '&mdash;&nbsp;:&nbsp;&mdash;', {
+                    tone: 'gc-pending', note: 'freq. não fechada', title: previousBalanceText
+                  })
+                : ''}
+          </div>
+
           ${saldoBHoras ? `
-            <!-- Final Balance -->
-            <div style="background:rgba(0,0,0,0.2);
-                        border-radius:10px;
-                        padding:14px 16px;
-                        margin-bottom:16px;
-                        backdrop-filter:blur(10px);
-                        border:2px solid rgba(255,255,255,0.15);">
-              <div style="font-size:11px;opacity:0.8;margin-bottom:6px;">
-                SALDO FINAL DO PERÍODO
-              </div>
-              <div style="font-size:22px;font-weight:700;color:${colorFinal};">
+            <div class="gc-card gc-card--total">
+              <div class="gc-label gc-label--plain gc-label--total">SALDO FINAL DO PERÍODO</div>
+              <div class="gc-value gc-value--total ${this.tone(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}">
                 ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}
               </div>
             </div>
           ` : ''}
-          
+
           ${cntErro > 0 ? `
-            <div style="background:rgba(255,107,107,0.2);
-                        border:1px solid rgba(255,107,107,0.4);
-                        border-radius:8px;
-                        padding:10px 12px;
-                        margin-bottom:16px;
-                        font-size:12px;">
-              <strong>${cntErro}</strong> dia(s) para corrigir
-            </div>
+            <div class="gc-alert"><strong>${cntErro}</strong> dia(s) para corrigir</div>
           ` : ''}
-          
-          <!-- Recalcular Button -->
-          <button id="${GRIFO_CONFIG.IDS.BTN_RELOAD}"
-                  style="width:100%;
-                         padding:14px;
-                         background:rgba(255,255,255,0.95);
-                         color:#667eea;
-                         border:none;
-                         border-radius:10px;
-                         font-size:14px;
-                         font-weight:700;
-                         cursor:pointer;
-                         transition:all 0.2s;
-                         box-shadow:0 4px 12px rgba(0,0,0,0.15);
-                         text-transform:uppercase;
-                         letter-spacing:0.5px;"
-                  onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(0,0,0,0.2)'"
-                  onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'">
-            🔄 Recalcular
-          </button>
+
+          <button id="${GRIFO_CONFIG.IDS.BTN_RELOAD}" class="gc-btn">🔄 Recalcular</button>
         </div>
       </div>
     `;
@@ -1131,21 +1043,167 @@ class GrifoCheck {
       tableHeader.append(containerHTML);
     }
 
-    $(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`).draggable();
+    this.makeDraggable($(`#${GRIFO_CONFIG.IDS.CONTAINER_TOTAL}`)[0]);
 
-    // Debug summary
-    debugLog('\\n--- CALCULATION SUMMARY ---');
-    debugLog(`  Jornada Total: ${GrifoUtils.formatMsec(saldoJornadaMesAt)}`);
-    debugLog(`  Horas Trabalhadas: ${GrifoUtils.formatMsec(saldoHorarioMes)}`);
-    debugLog(`  Jornada Acumulada até Hoje: ${GrifoUtils.formatMsec(this.state.saldoJornadaAcumHj)}`);
-    debugLog(`  Saldo Corrente: ${GrifoUtils.formatMsec(saldoCurrentCalc)}`);
-    debugLog(`  ${faltaSobra}: ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt)}`);
-    debugLog(`  Banco de Horas Anterior: ${previousBalanceText} (${GrifoUtils.formatMsec(saldoBHoras)})`);
-    debugLog(`  Saldo Final: ${GrifoUtils.formatMsec(saldoHorarioMes - saldoJornadaMesAt + saldoBHoras)}`);
-    debugLog(`  Erros: ${cntErro}`);
-    debugLog('=== executaCalculo END ===\\n');
+    this.logCalculation({
+      saldoJornadaMesAt, saldoHorarioMes, saldoCurrentCalc, faltaSobra,
+      previousBalanceText, saldoBHoras, cntErro
+    });
 
     this.setupEventHandlers();
+  }
+
+  /**
+   * Emit the end-of-calculation debug summary
+   * @param {object} vm - The numbers just computed
+   */
+  logCalculation(vm) {
+    if (!DEBUG) return;
+    // Arrow, not a bare reference: formatMsec uses `this`, so detaching it throws
+    const f = ms => GrifoUtils.formatMsec(ms);
+    debugLog('\n--- CALCULATION SUMMARY ---');
+    debugLog(`  Jornada Total: ${f(vm.saldoJornadaMesAt)}`);
+    debugLog(`  Horas Trabalhadas: ${f(vm.saldoHorarioMes)}`);
+    debugLog(`  Jornada Acumulada até Hoje: ${f(this.state.saldoJornadaAcumHj)}`);
+    debugLog(`  Saldo Corrente: ${f(vm.saldoCurrentCalc)}`);
+    debugLog(`  ${vm.faltaSobra}: ${f(vm.saldoHorarioMes - vm.saldoJornadaMesAt)}`);
+    debugLog(`  Banco de Horas Anterior: ${vm.previousBalanceText} (${f(vm.saldoBHoras)})`);
+    debugLog(`  Saldo Final: ${f(vm.saldoHorarioMes - vm.saldoJornadaMesAt + vm.saldoBHoras)}`);
+    debugLog(`  Erros: ${vm.cntErro}`);
+    debugLog('=== executaCalculo END ===\n');
+  }
+
+  /**
+   * Decide where the panel should appear, in priority order: where it already
+   * is (a re-render mid-session), then wherever the user last dragged it, then
+   * the default corner.
+   * @param {jQuery} $existing - The current panel, if one is on the page
+   * @returns {{left: string, top: string}} CSS values
+   */
+  resolvePanelPosition($existing) {
+    if ($existing.length) {
+      // getBoundingClientRect() is the coordinate space these fixed-position
+      // values are consumed in. jQuery's .position() special-cases
+      // position:fixed and returns the same numbers - measured identical on
+      // the live page - so this is not a drift fix, despite appearances.
+      const rect = $existing[0].getBoundingClientRect();
+      return this.clampPosition(rect.left, rect.top);
+    }
+
+    const saved = this.loadPanelPosition();
+    if (saved) {
+      debugLog(`Restoring saved panel position: ${saved.left},${saved.top}`);
+      return this.clampPosition(saved.left, saved.top);
+    }
+
+    return {
+      left: GRIFO_CONFIG.PANEL.DEFAULT_LEFT,
+      top: GRIFO_CONFIG.PANEL.DEFAULT_TOP
+    };
+  }
+
+  /**
+   * Keep a grabbable corner of the panel inside the viewport. Matters most for
+   * a position restored from a cookie written on a larger screen.
+   * @param {number} left - Desired left in px
+   * @param {number} top - Desired top in px
+   * @returns {{left: string, top: string}} CSS values
+   */
+  clampPosition(left, top) {
+    const { MIN_VISIBLE_X, MIN_VISIBLE_Y } = GRIFO_CONFIG.PANEL;
+    return {
+      left: `${Math.max(0, Math.min(left, window.innerWidth - MIN_VISIBLE_X))}px`,
+      top: `${Math.max(0, Math.min(top, window.innerHeight - MIN_VISIBLE_Y))}px`
+    };
+  }
+
+  /**
+   * Read the panel position the user last dragged to
+   * @returns {{left: number, top: number}|null} Position, or null if unset or unusable
+   */
+  loadPanelPosition() {
+    try {
+      const raw = Cookies.get(this.POSITION_COOKIE_NAME);
+      if (!raw) return null;
+
+      const saved = JSON.parse(raw);
+      // A hand-edited or truncated cookie must not wedge the panel somewhere
+      // unreachable, so anything non-numeric falls back to the default
+      if (!Number.isFinite(saved?.left) || !Number.isFinite(saved?.top)) {
+        debugLog('Saved panel position is malformed, ignoring it');
+        return null;
+      }
+      return { left: saved.left, top: saved.top };
+    } catch (error) {
+      console.error('Error reading saved panel position:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Remember where the user dropped the panel
+   * @param {number} left - Left offset in px
+   * @param {number} top - Top offset in px
+   */
+  savePanelPosition(left, top) {
+    const position = { left: Math.round(left), top: Math.round(top) };
+    try {
+      Cookies.set(this.POSITION_COOKIE_NAME, JSON.stringify(position), {
+        expires: GRIFO_CONFIG.TIME.COOKIE_EXPIRY_DAYS
+      });
+      debugLog(`Saved panel position: ${position.left},${position.top}`);
+    } catch (error) {
+      console.error('Error saving panel position:', error);
+    }
+  }
+
+  /**
+   * Make the panel draggable with pointer events.
+   * Replaces jQuery UI's .draggable(), which was the only thing 253KB of
+   * jquery-ui was being loaded for.
+   * @param {HTMLElement} el - Element to drag
+   */
+  makeDraggable(el) {
+    if (!el) return;
+
+    let startX = 0;
+    let startY = 0;
+    let originLeft = 0;
+    let originTop = 0;
+
+    const onMove = event => {
+      const left = originLeft + (event.clientX - startX);
+      const top = originTop + (event.clientY - startY);
+      // Keep a grabbable edge on screen whatever the drag does
+      el.style.left = `${Math.max(0, Math.min(left, window.innerWidth - 120))}px`;
+      el.style.top = `${Math.max(0, Math.min(top, window.innerHeight - 60))}px`;
+    };
+
+    const onUp = event => {
+      const rect = el.getBoundingClientRect();
+      this.savePanelPosition(rect.left, rect.top);
+      el.releasePointerCapture?.(event.pointerId);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+    };
+
+    el.addEventListener('pointerdown', event => {
+      // Never start a drag from the button or an input inside the panel
+      if (event.button !== 0 || event.target.closest('button, input, a')) return;
+
+      const rect = el.getBoundingClientRect();
+      startX = event.clientX;
+      startY = event.clientY;
+      originLeft = rect.left;
+      originTop = rect.top;
+
+      el.setPointerCapture?.(event.pointerId);
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
+      event.preventDefault();   // stop the browser starting a text selection
+    });
   }
 
   /**
@@ -1173,7 +1231,7 @@ class GrifoCheck {
           $elem.css('background-color', GRIFO_CONFIG.COLORS.WHITE);
         }
 
-        if (event.keyCode === 13) { // Enter key
+        if (event.key === 'Enter') {
           $(`#${GRIFO_CONFIG.IDS.BTN_RELOAD}`).click();
         }
       });
@@ -1188,7 +1246,7 @@ class GrifoCheck {
    * fills the empty time boxes with the schedule times
    */
   autoFillTeletrabalho() {
-    debugLog('\\n=== Starting autoFillTeletrabalho ===');
+    debugLog('\n=== Starting autoFillTeletrabalho ===');
     
     const tableRows = GrifoUtils.safeSelect(GRIFO_CONFIG.SELECTORS.TABLE_ROWS);
     if (!tableRows) {
@@ -1213,7 +1271,7 @@ class GrifoCheck {
         const hasTeletrabalho = onmouseover.toLowerCase().includes('teletrabalho');
         
         if (hasTeletrabalho) {
-          debugLog(`\\n  Row ${contador}: ✓ TELETRABALHO FOUND`);
+          debugLog(`\n  Row ${contador}: ✓ TELETRABALHO FOUND`);
           
           // Extract schedule times from column 2 (td:eq(1))
           const scheduleCell = $row.find('td:eq(1)');
@@ -1279,9 +1337,14 @@ class GrifoCheck {
    */
   start() {
     debugLog('\n\n========== GRIFO CHECK START ==========');
-    
-    this.saveCookieInputValues();
-    
+
+    // Must run before saving: on a month change the inputs on screen belong to
+    // the new period, and saving them first would write them under the old key
+    const periodChanged = this.refreshPeriodContext();
+    if (!periodChanged) {
+      this.saveCookieInputValues();
+    }
+
     debugLog('Getting array data from cookies...');
     const arrDados = this.getArrResultCk();
     
@@ -1300,7 +1363,7 @@ class GrifoCheck {
       arrDados.arrHorariosOrig
     );
     debugLog(`  Result - saldoHorarioMes: ${GrifoUtils.formatMsec(arrResultH.saldoHorarioMes)}`);
-    debugLog(`  Result - cnt_erro: ${arrResultH.cnt_erro}, cnt_hoje: ${arrResultH.cnt_hoje}`);
+    debugLog(`  Result - cntErro: ${arrResultH.cntErro}, cntHoje: ${arrResultH.cntHoje}`);
 
     // Auto-fill time entries for days with Teletrabalho observation
     this.autoFillTeletrabalho();
@@ -1333,10 +1396,8 @@ class GrifoCheck {
 
     this.executaCalculo(
       arrResultJ.saldoJornadaMesAt,
-      arrResultJ.saldoCurrent,
       arrResultH.saldoHorarioMes,
-      arrResultH.cnt_erro,
-      arrResultH.cnt_hoje,
+      arrResultH.cntErro,
       ultimaEntrada,
       jornadaDoDia,
       horasTrabalhadasHojeMs
@@ -1352,7 +1413,7 @@ if (typeof jQuery !== 'undefined') {
     // Small delay to ensure page is fully loaded
     setTimeout(() => {
       window.grifoCheck = new GrifoCheck();
-    }, 1000);
+    }, GRIFO_CONFIG.TIME.BOOT_DELAY);
   });
 } else {
   console.error('Grifo Check: jQuery is not loaded');
